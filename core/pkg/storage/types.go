@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/apiserver/pkg/storage/value"
@@ -87,7 +87,7 @@ func (v SimpleVersioner) PrepareObjectForStorage(obj runtime.Object) error {
 	if err != nil {
 		return err
 	}
-	
+
 	if accessor.GetCreationTimestamp().Time.IsZero() {
 		now := metav1.Time{Time: time.Now()}
 		accessor.SetCreationTimestamp(now)
@@ -145,7 +145,7 @@ func (w *SimpleWatch) Stop() {
 // ResultChan implements watch.Interface
 func (w *SimpleWatch) ResultChan() <-chan watch.Event {
 	eventChan := make(chan watch.Event, 100)
-	
+
 	go func() {
 		defer close(eventChan)
 		for {
@@ -162,7 +162,7 @@ func (w *SimpleWatch) ResultChan() <-chan watch.Event {
 			}
 		}
 	}()
-	
+
 	return eventChan
 }
 

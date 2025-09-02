@@ -140,12 +140,12 @@ func IsTenantKey(key string, tenantID string) bool {
 	if tenantID == "" {
 		return true // No tenant restriction
 	}
-	
+
 	tenant, _, _, _, err := ParseKey(key)
 	if err != nil {
 		return false
 	}
-	
+
 	return tenant == tenantID
 }
 
@@ -187,7 +187,7 @@ func CreateKeyGenerator(config Config) func(resource, namespace, name string) st
 	}
 }
 
-// CreateListKeyGenerator returns a function that generates list keys for a specific configuration  
+// CreateListKeyGenerator returns a function that generates list keys for a specific configuration
 func CreateListKeyGenerator(config Config) func(resource, namespace string) string {
 	var tenantConfig *TenantConfig
 	if config.TenantID != "" {
