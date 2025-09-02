@@ -340,7 +340,7 @@ jobs:
 
       - name: Run gosec security scan
         run: |
-          go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
+          go install github.com/securecodewarrior/gosec/v2/cmd/gosec@v2.21.4
           gosec -fmt sarif -out gosec-report.sarif -stdout ./... || echo "Security scan completed with findings"
 
       - name: Upload SARIF file
