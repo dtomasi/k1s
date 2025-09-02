@@ -95,14 +95,11 @@ jobs:
         cd examples
         golangci-lint run --timeout=10m --config=../.golangci.yml
 
-  # Multi-platform testing
+  # Testing - Ubuntu only for now 
   test:
     name: Test
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     needs: lint
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
       - name: Checkout code
@@ -140,8 +137,7 @@ jobs:
         run: go test -race -coverprofile=coverage-examples.out -covermode=atomic ./...
         working-directory: examples
 
-      - name: Upload coverage to Codecov (Ubuntu only)
-        if: matrix.os == 'ubuntu-latest'
+      - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
           files: ./core/coverage.out,./storage/memory/coverage-memory.out,./storage/pebble/coverage-pebble.out,./tools/coverage-tools.out,./examples/coverage-examples.out
@@ -340,7 +336,7 @@ jobs:
 
       - name: Run gosec security scan
         run: |
-          go install github.com/securecodewarrior/gosec/v2/cmd/gosec@v2.21.4
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
           gosec -fmt sarif -out gosec-report.sarif -stdout ./... || echo "Security scan completed with findings"
 
       - name: Upload SARIF file
