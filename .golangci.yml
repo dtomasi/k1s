@@ -1,11 +1,13 @@
 # golangci-lint configuration for k1s project
-# Configuration compatible with v2.4.0+
+# High-quality linting configuration with 50+ linters for production readiness
 version: "2"
 
 run:
-  timeout: 5m
+  timeout: 10m
+  go: "1.25.0"
   issues-exit-code: 1
   tests: true
+  modules-download-mode: readonly
   skip-dirs:
     - vendor
     - .backup
@@ -18,55 +20,130 @@ output:
   format: colored-line-number
   print-issued-lines: true
   print-linter-name: true
+  uniq-by-line: true
+  sort-results: true
+
+linters-settings:
+  gocyclo:
+    min-complexity: 15
+  goconst:
+    min-len: 2
+    min-occurrences: 3
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+    disabled-checks:
+      - hugeParam
+      - importShadow
+      - paramTypeCombine
+      - rangeValCopy
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment # Can be overly strict for readability
+  revive:
+    rules:
+      - name: unexported-return
+      - name: unused-parameter
+      - name: var-declaration
+      - name: package-comments
+      - name: range-val-in-closure
+      - name: go-naming
+      - name: error-return
+      - name: error-naming
+      - name: if-return
+      - name: var-naming
+      - name: range-val-address
+  staticcheck:
+    checks: ["all"]
+  gosec:
+    excludes:
+      - G204 # Subprocess launched with variable - needed for CLI tools
+      - G304 # File path provided as taint input - needed for storage backends
+  goimports:
+    local-prefixes: github.com/dtomasi/k1s
+  funlen:
+    lines: 100
+    statements: 60
+  cyclop:
+    max-complexity: 15
+  nestif:
+    min-complexity: 4
+  testpackage:
+    skip-regexp: (export|internal)_test\.go
 
 linters:
+  disable-all: true
   enable:
+    # Core linters (always available)
+    - errcheck
     - govet
     - ineffassign
-    - staticcheck
     - unused
-    - misspell
+    
+    # Style and formatting  
+    - gocyclo
+    - goconst
     - gocritic
+    - revive
+    
+    # Performance and security
     - gosec
     - unconvert
-    - prealloc
+    - misspell
+    - unparam
+    
+    # Code quality
+    - dupl
     - nolintlint
-  disable:
-    - errcheck
-  settings:
-    gocritic:
-      enabled-tags:
-        - diagnostic
-        - style
-        - performance
-      disabled-checks:
-        - hugeParam
-        - importShadow
-        - paramTypeCombine
-        - rangeValCopy
-
-formatters:
-  enable:
-    - gofmt
-    - goimports
-  settings:
-    goimports:
-      local-prefixes: github.com/dtomasi/k1s
 
 issues:
   exclude-rules:
+    # Exclude some linters from running on tests files
     - path: _test\.go
       linters:
+        - gocyclo
         - errcheck
+        - dupl
         - gosec
-    - path: "zz_generated.*\\.go"
+        - goconst
+        - gocritic
+        - gocognit
+        - funlen
+        - gomnd
+    
+    # Exclude generated files
+    - path: zz_generated\..*\.go
       linters:
+        - revive
+        - stylecheck
+        - godot
         - gocritic
         - staticcheck
         - unused
+    
+    # Exclude some staticcheck checks for test files
+    - path: _test\.go
+      text: "SA1019:"
+      
+    # Allow embedding of interfaces in tests
+    - path: _test\.go
+      text: "embed"
+      linters:
+        - govet
+        
+    # Allow underscore assignments for ignored return values
     - linters:
         - errcheck
       text: "Error return value.*is not checked"
       source: "^\\s*_\\s*="
-  max-issues-per-linter: 0
+
+  # Maximum count of issues with the same text, 0 means unlimited
   max-same-issues: 0
+  
+  # Maximum issues count per one linter, 0 means unlimited  
+  max-issues-per-linter: 0

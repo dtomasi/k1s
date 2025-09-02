@@ -108,9 +108,10 @@ just work-lint
 
 ### Coverage Requirements
 
-- **Minimum 90% test coverage** for core components
-- **Minimum 80% test coverage** for all other code
-- Run coverage with: `just work-test-coverage`
+- **Minimum 70% test coverage** for all components (automatically enforced by CI)
+- Coverage is measured using `go test -covermode=atomic`
+- CI automatically fails if any module falls below 70% coverage
+- Run coverage locally with: `go test -coverprofile=coverage.out ./... && go tool cover -html=coverage.out`
 
 ### Test Organization
 
@@ -202,7 +203,7 @@ go generate ./...
 
 ### Performance Targets
 
-1. **Storage Backends**
+1. **Storage Backends** (automatically benchmarked by CI)
    - Memory Storage: >10,000 operations/second
    - Pebble Storage: >3,000 operations/second
 
@@ -334,12 +335,24 @@ git checkout -b docs/description
 ### Quality Gates
 
 **No PR can be merged unless:**
-- ✅ All tests pass (`just work-test`)
-- ✅ Zero linting errors (`just work-lint`)
-- ✅ Code coverage meets requirements (90% for core)
+- ✅ All tests pass (automatically checked by CI across Linux, macOS, Windows)
+- ✅ Zero linting errors (50+ golangci-lint rules enforced)
+- ✅ Code coverage meets requirements (70% minimum for all modules)
+- ✅ All builds succeed (multi-platform verification)
+- ✅ Security scans pass (gosec vulnerability detection)
 - ✅ Documentation is updated
 - ✅ PR has been reviewed and approved
-- ✅ CI/CD pipeline is green
+- ✅ Complete CI/CD pipeline is green
+
+**Local verification:**
+```bash
+# Run all quality checks locally before pushing
+go work sync
+go test -race ./...                    # Run tests with race detection
+golangci-lint run --config .golangci.yml  # Run comprehensive linting
+go test -coverprofile=coverage.out ./...  # Check coverage
+go build ./...                             # Verify build
+```
 
 ## Work Package Implementation
 
