@@ -12,9 +12,9 @@ type unmarshalFunc func(data []byte, v interface{}) error
 
 // decodeObject performs the common decoding logic for both JSON and YAML codecs.
 // It takes the data, defaults, target object, unmarshal function, scheme, and format name.
-func decodeObject(data []byte, defaults *schema.GroupVersionKind, into runtime.Object, 
+func decodeObject(data []byte, defaults *schema.GroupVersionKind, into runtime.Object,
 	unmarshal unmarshalFunc, scheme *runtime.Scheme, format string) (runtime.Object, *schema.GroupVersionKind, error) {
-	
+
 	if len(data) == 0 {
 		return nil, nil, fmt.Errorf("cannot decode empty data")
 	}

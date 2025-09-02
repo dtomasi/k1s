@@ -64,7 +64,7 @@ func (f *CodecFactory) SupportedMediaTypes() []runtime.SerializerInfo {
 		},
 		{
 			MediaType:        "application/yaml",
-			MediaTypeType:    "application", 
+			MediaTypeType:    "application",
 			MediaTypeSubType: "yaml",
 			EncodesAsText:    true,
 			Serializer:       NewYAMLCodec(f.scheme),

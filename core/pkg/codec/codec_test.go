@@ -7,7 +7,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -21,7 +21,7 @@ import (
 type TestObject struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	
+
 	Spec TestObjectSpec `json:"spec,omitempty"`
 }
 
@@ -88,18 +88,18 @@ var _ = Describe("Codec", func() {
 	BeforeEach(func() {
 		// Create a new scheme and register our test types
 		scheme = k1sruntime.NewScheme()
-		
+
 		// Define the GVK for our test object
 		testGV := schema.GroupVersion{Group: "test.k1s.io", Version: "v1alpha1"}
 		testGVK = testGV.WithKind("TestObject")
-		
+
 		// Register test types
 		scheme.AddKnownTypes(testGV, &TestObject{}, &TestObjectList{})
 		metav1.AddToGroupVersion(scheme, testGV)
-		
+
 		// Create codec factory
 		codecFactory = codec.NewCodecFactory(scheme)
-		
+
 		// Create test object
 		testObj = &TestObject{
 			TypeMeta: metav1.TypeMeta{
@@ -122,12 +122,12 @@ var _ = Describe("Codec", func() {
 		It("should support JSON and YAML media types", func() {
 			mediaTypes := codecFactory.SupportedMediaTypes()
 			Expect(mediaTypes).To(HaveLen(2))
-			
+
 			mediaTypeNames := make([]string, len(mediaTypes))
 			for i, mt := range mediaTypes {
 				mediaTypeNames[i] = mt.MediaType
 			}
-			
+
 			Expect(mediaTypeNames).To(ContainElements("application/json", "application/yaml"))
 		})
 
@@ -165,15 +165,15 @@ var _ = Describe("Codec", func() {
 			var buf bytes.Buffer
 			err := jsonCodec.Encode(testObj, &buf)
 			Expect(err).ToNot(HaveOccurred())
-			
+
 			data := buf.Bytes()
 			Expect(data).ToNot(BeEmpty())
-			
+
 			// Verify it's valid JSON
 			var jsonObj map[string]interface{}
 			err = json.Unmarshal(data, &jsonObj)
 			Expect(err).ToNot(HaveOccurred())
-			
+
 			// Check key fields
 			Expect(jsonObj["apiVersion"]).To(Equal("test.k1s.io/v1alpha1"))
 			Expect(jsonObj["kind"]).To(Equal("TestObject"))
@@ -185,13 +185,13 @@ var _ = Describe("Codec", func() {
 			var buf bytes.Buffer
 			err := jsonCodec.Encode(testObj, &buf)
 			Expect(err).ToNot(HaveOccurred())
-			
+
 			// Now decode it back
 			decoded, gvk, err := jsonCodec.Decode(buf.Bytes(), nil, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(gvk).ToNot(BeNil())
 			Expect(*gvk).To(Equal(testGVK))
-			
+
 			decodedObj, ok := decoded.(*TestObject)
 			Expect(ok).To(BeTrue())
 			Expect(decodedObj.Name).To(Equal(testObj.Name))
@@ -205,14 +205,14 @@ var _ = Describe("Codec", func() {
 			var buf bytes.Buffer
 			err := jsonCodec.Encode(testObj, &buf)
 			Expect(err).ToNot(HaveOccurred())
-			
+
 			// Decode into pre-allocated object
 			into := &TestObject{}
 			decoded, gvk, err := jsonCodec.Decode(buf.Bytes(), nil, into)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(gvk).ToNot(BeNil())
 			Expect(decoded).To(Equal(into))
-			
+
 			// Verify content
 			Expect(into.Name).To(Equal(testObj.Name))
 			Expect(into.Spec.Name).To(Equal(testObj.Spec.Name))
@@ -233,12 +233,12 @@ var _ = Describe("Codec", func() {
 
 		It("should use defaults when TypeMeta is incomplete", func() {
 			incompleteJSON := `{"metadata":{"name":"test"},"spec":{"name":"Test","value":123}}`
-			
+
 			defaultGVK := testGVK
 			decoded, gvk, err := jsonCodec.Decode([]byte(incompleteJSON), &defaultGVK, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(*gvk).To(Equal(defaultGVK))
-			
+
 			decodedObj := decoded.(*TestObject)
 			Expect(decodedObj.Spec.Name).To(Equal("Test"))
 			Expect(decodedObj.Spec.Value).To(Equal(int32(123)))
@@ -260,15 +260,15 @@ var _ = Describe("Codec", func() {
 			var buf bytes.Buffer
 			err := yamlCodec.Encode(testObj, &buf)
 			Expect(err).ToNot(HaveOccurred())
-			
+
 			data := buf.Bytes()
 			Expect(data).ToNot(BeEmpty())
-			
+
 			// Verify it's valid YAML by unmarshaling
 			var yamlObj map[string]interface{}
 			err = yaml.Unmarshal(data, &yamlObj)
 			Expect(err).ToNot(HaveOccurred())
-			
+
 			// Check key fields
 			Expect(yamlObj["apiVersion"]).To(Equal("test.k1s.io/v1alpha1"))
 			Expect(yamlObj["kind"]).To(Equal("TestObject"))
@@ -279,13 +279,13 @@ var _ = Describe("Codec", func() {
 			var buf bytes.Buffer
 			err := yamlCodec.Encode(testObj, &buf)
 			Expect(err).ToNot(HaveOccurred())
-			
+
 			// Now decode it back
 			decoded, gvk, err := yamlCodec.Decode(buf.Bytes(), nil, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(gvk).ToNot(BeNil())
 			Expect(*gvk).To(Equal(testGVK))
-			
+
 			decodedObj, ok := decoded.(*TestObject)
 			Expect(ok).To(BeTrue())
 			Expect(decodedObj.Name).To(Equal(testObj.Name))
@@ -306,7 +306,7 @@ spec:
 			decoded, gvk, err := yamlCodec.Decode([]byte(yamlData), nil, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(*gvk).To(Equal(testGVK))
-			
+
 			decodedObj := decoded.(*TestObject)
 			Expect(decodedObj.Name).To(Equal("test-yaml"))
 			Expect(decodedObj.Spec.Name).To(Equal("YAML Test"))
@@ -336,7 +336,7 @@ spec:
 			decoded, gvk, err := deserializer.Decode([]byte(jsonData), nil, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(*gvk).To(Equal(testGVK))
-			
+
 			decodedObj := decoded.(*TestObject)
 			Expect(decodedObj.Name).To(Equal("json-test"))
 			Expect(decodedObj.Spec.Name).To(Equal("JSON Test"))
@@ -355,7 +355,7 @@ spec:
 			decoded, gvk, err := deserializer.Decode([]byte(yamlData), nil, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(*gvk).To(Equal(testGVK))
-			
+
 			decodedObj := decoded.(*TestObject)
 			Expect(decodedObj.Name).To(Equal("yaml-test"))
 			Expect(decodedObj.Spec.Name).To(Equal("YAML Test"))
@@ -462,7 +462,7 @@ kind: TestObject`
 
 		It("should handle malformed JSON", func() {
 			malformedJSON := `{"apiVersion":"test.k1s.io/v1alpha1","kind":"TestObject",}`
-			
+
 			_, _, err := jsonCodec.Decode([]byte(malformedJSON), nil, nil)
 			Expect(err).To(HaveOccurred())
 		})
@@ -470,7 +470,7 @@ kind: TestObject`
 		It("should handle write errors", func() {
 			// Create a writer that always fails
 			failingWriter := &failingWriter{}
-			
+
 			err := jsonCodec.Encode(testObj, failingWriter)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to write"))

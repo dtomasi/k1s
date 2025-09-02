@@ -114,9 +114,9 @@ func (s *YAMLSerializer) RecognizesData(data []byte) (bool, bool, error) {
 
 // UniversalDeserializer can decode both JSON and YAML formats.
 type UniversalDeserializer struct {
-	scheme       *runtime.Scheme
-	jsonCodec    *JSONCodec
-	yamlCodec    *YAMLCodec
+	scheme         *runtime.Scheme
+	jsonCodec      *JSONCodec
+	yamlCodec      *YAMLCodec
 	jsonSerializer *JSONSerializer
 	yamlSerializer *YAMLSerializer
 }
