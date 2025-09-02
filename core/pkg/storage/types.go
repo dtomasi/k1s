@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -108,6 +110,20 @@ func (v SimpleVersioner) ObjectResourceVersion(obj runtime.Object) (uint64, erro
 // ParseWatchResourceVersion parses a watch resource version string
 func (v SimpleVersioner) ParseWatchResourceVersion(resourceVersion string) (uint64, error) {
 	return ParseResourceVersion(resourceVersion)
+}
+
+// ParseResourceVersion parses a resource version string
+func (v SimpleVersioner) ParseResourceVersion(resourceVersion string) (uint64, error) {
+	if resourceVersion == "" {
+		return 0, nil
+	}
+
+	// Try to parse as uint64
+	if version, err := strconv.ParseUint(resourceVersion, 10, 64); err == nil {
+		return version, nil
+	}
+
+	return 0, fmt.Errorf("invalid resource version: %s", resourceVersion)
 }
 
 // WatchEvent represents a single watch event
