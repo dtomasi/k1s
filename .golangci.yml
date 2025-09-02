@@ -1,0 +1,72 @@
+# golangci-lint configuration for k1s project
+# Configuration compatible with v2.4.0+
+version: "2"
+
+run:
+  timeout: 5m
+  issues-exit-code: 1
+  tests: true
+  skip-dirs:
+    - vendor
+    - .backup
+    - bin
+  skip-files:
+    - ".*_generated\\.go$"
+    - "zz_generated.*\\.go$"
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+
+linters:
+  enable:
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - gocritic
+    - gosec
+    - unconvert
+    - prealloc
+    - nolintlint
+  disable:
+    - errcheck
+  settings:
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+      disabled-checks:
+        - hugeParam
+        - importShadow
+        - paramTypeCombine
+        - rangeValCopy
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes: github.com/dtomasi/k1s
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec
+    - path: "zz_generated.*\\.go"
+      linters:
+        - gocritic
+        - staticcheck
+        - unused
+    - linters:
+        - errcheck
+      text: "Error return value.*is not checked"
+      source: "^\\s*_\\s*="
+  max-issues-per-linter: 0
+  max-same-issues: 0

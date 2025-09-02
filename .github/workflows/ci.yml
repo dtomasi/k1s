@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@v1
+        with:
+          cache: "true"
+
+      - name: Sync workspace
+        run: go work sync
+
+      - name: Format check
+        run: |
+          just format
+          if [[ -n $(git diff --name-only) ]]; then
+            echo "Code is not formatted. Please run 'just format'"
+            git diff
+            exit 1
+          fi
+
+      - name: Go vet
+        run: just vet
+
+      - name: golangci-lint
+        run: just lint
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: lint
+    strategy:
+      matrix:
+        storage: [memory, bolt]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@v1
+        with:
+          cache: "true"
+
+      - name: Sync workspace
+        run: go work sync
+
+      - name: Run tests
+        run: just test-race
+
+      - name: Generate coverage report
+        run: just test-cover
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.txt
+          fail_ci_if_error: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@v1
+        with:
+          cache: "true"
+
+      - name: Sync workspace
+        run: go work sync
+
+      - name: Build all modules
+        run: just build
+
+      - name: Verify binary functionality
+        run: |
+          ./bin/cli-gen --help
+          ./bin/k1s-demo --help
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Gosec Security Scanner
+        uses: securecodewarrior/github-action-gosec@master
+        with:
+          args: './...'
