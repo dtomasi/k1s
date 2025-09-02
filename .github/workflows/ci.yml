@@ -143,7 +143,7 @@ jobs:
 
     - name: Upload coverage to Codecov (Ubuntu only)
       if: matrix.os == 'ubuntu-latest'
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v5
       with:
         files: ./core/coverage.out,./storage/memory/coverage-memory.out,./storage/pebble/coverage-pebble.out,./tools/coverage-tools.out,./examples/coverage-examples.out
         fail_ci_if_error: true
