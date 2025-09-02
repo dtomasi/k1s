@@ -1,0 +1,107 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: categories.examples.k1s.dtomasi.github.io
+spec:
+  group: examples.k1s.dtomasi.github.io
+  names:
+    kind: Category
+    listKind: CategoryList
+    plural: categories
+    shortNames:
+    - cat
+    singular: category
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.name
+      name: Category Name
+      type: string
+    - jsonPath: .status.itemCount
+      name: Items
+      type: integer
+    - jsonPath: .status.subCategoryCount
+      name: Subcategories
+      type: integer
+    - jsonPath: .spec.parent
+      name: Parent
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Category is the Schema for the categories API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: CategorySpec defines the desired state of Category
+            properties:
+              description:
+                description: Description provides details about the category
+                maxLength: 200
+                type: string
+              name:
+                description: Name is the display name of the category
+                maxLength: 50
+                minLength: 1
+                type: string
+              parent:
+                description: Parent is the name of the parent category for hierarchical
+                  organization
+                type: string
+              tags:
+                description: Tags are labels for organizing and filtering categories
+                items:
+                  type: string
+                type: array
+            required:
+            - name
+            type: object
+          status:
+            description: CategoryStatus defines the observed state of Category
+            properties:
+              itemCount:
+                default: 0
+                description: ItemCount is the number of items in this category
+                format: int32
+                type: integer
+              lastUpdated:
+                description: LastUpdated is the timestamp when the category was last
+                  modified
+                format: date-time
+                type: string
+              subCategoryCount:
+                default: 0
+                description: SubCategoryCount is the number of subcategories
+                format: int32
+                type: integer
+            required:
+            - itemCount
+            - subCategoryCount
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
