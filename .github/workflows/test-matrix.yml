@@ -42,7 +42,7 @@ jobs:
 
       - name: Upload coverage to Codecov (Ubuntu only)
         if: inputs.coverage-upload && matrix.os == 'ubuntu-latest' && matrix.go-version == '1.24.0'
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           files: ./core/coverage.out,./storage/memory/coverage.out,./storage/pebble/coverage.out,./tools/coverage.out,./examples/coverage.out
           fail_ci_if_error: true
