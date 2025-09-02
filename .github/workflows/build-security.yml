@@ -1,0 +1,58 @@
+name: Build & Security
+
+on:
+  workflow_call:
+    inputs:
+      go-version:
+        description: 'Go version to use (defaults to hermit-detected version)'
+        required: false
+        type: string
+        default: ''
+      run-benchmarks:
+        description: 'Run performance benchmarks'
+        required: false
+        type: boolean
+        default: true
+      run-security-scan:
+        description: 'Run security scan'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  build-security:
+    name: Build & Security${{ inputs.go-version && format(' (Go {0})', inputs.go-version) || '' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v5
+
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@v1
+        with:
+          cache: "true"
+
+      - name: Run build and security
+        run: |
+          if [ -n "${{ inputs.go-version }}" ]; then
+            just gh-build-security ${{ inputs.go-version }} ${{ inputs.run-benchmarks }} ${{ inputs.run-security-scan }}
+          else
+            just gh-build-security ${{ inputs.run-benchmarks }} ${{ inputs.run-security-scan }}
+          fi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: k1s-binaries-${{ inputs.go-version }}
+          path: |
+            bin/cli-gen
+            bin/k1s-demo
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v3
+        if: always() && inputs.run-security-scan
+        with:
+          sarif_file: gosec-report.sarif

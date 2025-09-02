@@ -1,0 +1,51 @@
+name: Test Matrix
+
+on:
+  workflow_call:
+    inputs:
+      go-versions:
+        description: 'Go versions to test (JSON array)'
+        required: false
+        type: string
+        default: '["1.24.0"]'
+      os-matrix:
+        description: 'Operating systems to test (JSON array)'
+        required: false
+        type: string
+        default: '["ubuntu-latest", "macos-latest", "windows-latest"]'
+      coverage-upload:
+        description: 'Upload coverage to Codecov'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  test:
+    name: Test (Go ${{ matrix.go-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: ${{ fromJSON(inputs.os-matrix) }}
+        go-version: ${{ fromJSON(inputs.go-versions) }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@v1
+        with:
+          cache: "true"
+
+      - name: Run test matrix
+        run: just gh-test-matrix ${{ matrix.go-version }}
+
+      - name: Upload coverage to Codecov (Ubuntu only)
+        if: inputs.coverage-upload && matrix.os == 'ubuntu-latest' && matrix.go-version == '1.24.0'
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./core/coverage.out,./storage/memory/coverage.out,./storage/pebble/coverage.out,./tools/coverage.out,./examples/coverage.out
+          fail_ci_if_error: true
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
