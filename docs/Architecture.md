@@ -52,38 +52,45 @@ K1s is a **Kubernetes-native CLI runtime** that provides embedded storage, event
 
 ```mermaid
 graph TB
-    subgraph "K1S CLI-Optimized Architecture"
+    subgraph "K1S CLI-Optimized Architecture with RBAC"
         subgraph "CLI Application Layer"
             CLI[CLI Application<br/>cobra/pflag based]
             TRIGGER[Trigger System<br/>Manual/Event/Periodic]
         end
         
+        subgraph "Security Layer (Optional)"
+            AUTH[Authentication<br/>• File-based<br/>• OIDC<br/>• Service Accounts]
+            AUTHZ[Authorization<br/>• RBAC Policies<br/>• Role Resolution<br/>• Permission Checking]
+            AUDIT[Audit Logging<br/>• Security Events<br/>• Access Tracking]
+        end
+        
         subgraph "K1S Runtime Packages"
             CLIRT[CLI Runtime Package<br/>• Resource Builders<br/>• Output Formatters<br/>• Factory Pattern]
             CTRLRT[Controller Runtime Package<br/>• Triggered Reconciliation<br/>• Embedded/Plugin Controllers]
+            PLUGIN[Plugin Manager<br/>• Restricted Clients<br/>• Permission Scoping<br/>• Sandbox Isolation]
         end
         
         subgraph "K1S Core Runtime"
-            RUNTIME[K1S Runtime<br/>• Orchestration<br/>• Lifecycle Management]
-            CLIENT[K1S Client<br/>• CRUD Operations<br/>• Strategic Merge<br/>• Status Subresources]
-            EVENTS[Event System<br/>• Direct Event Recording<br/>• Immediate Storage Write]
+            RUNTIME[K1S Runtime<br/>• Orchestration<br/>• Lifecycle Management<br/>• RBAC Integration]
+            CLIENT[K1S Client<br/>• CRUD Operations<br/>• Strategic Merge<br/>• Status Subresources<br/>• Permission Checks]
+            EVENTS[Event System<br/>• Direct Event Recording<br/>• Immediate Storage Write<br/>• User Attribution]
         end
         
         subgraph "Resource Management Layer"
-            REGISTRY[Resource Registry<br/>• GVK/GVR Mapping<br/>• Dynamic Registration]
+            REGISTRY[Resource Registry<br/>• GVK/GVR Mapping<br/>• Dynamic Registration<br/>• Permission Metadata]
             VALIDATION[Validation Engine<br/>• Kubebuilder Markers<br/>• CEL Expressions]
             DEFAULTING[Defaulting Engine<br/>• Auto-defaults<br/>• Create/Update Hooks]
-            INFORMERS[Informer Factory<br/>• On-Demand Queries<br/>• Direct Storage Access]
+            INFORMERS[Informer Factory<br/>• On-Demand Queries<br/>• Direct Storage Access<br/>• Filtered by Permissions]
         end
         
         subgraph "Core Infrastructure Layer"
             CODEC[Serialization<br/>• JSON/YAML Codec<br/>• Object Versioning]
-            SCHEME[Runtime Scheme<br/>• Type Registration<br/>• GVK Management]
-            STORAGE[Storage Interface<br/>• Multi-Tenant Support<br/>• Watch Interface]
+            SCHEME[Runtime Scheme<br/>• Type Registration<br/>• GVK Management<br/>• RBAC Resources]
+            STORAGE[Storage Interface<br/>• Multi-Tenant Support<br/>• Watch Interface<br/>• Access Control]
         end
         
         subgraph "Multi-Tenant Storage Layer"
-            FACTORY[Storage Factory<br/>• Backend Selection<br/>• Tenant Configuration]
+            FACTORY[Storage Factory<br/>• Backend Selection<br/>• Tenant Configuration<br/>• Isolation Enforcement]
         end
         
         subgraph "Storage Backends"
@@ -94,8 +101,15 @@ graph TB
     
     %% CLI Integration
     CLI --> TRIGGER
+    CLI -.->|When RBAC Enabled| AUTH
     TRIGGER --> CLIRT
     TRIGGER --> CTRLRT
+    
+    %% Security Layer (dotted lines = optional)
+    AUTH -.-> AUTHZ
+    AUTHZ -.-> CLIENT
+    AUTHZ -.-> PLUGIN
+    AUTHZ -.-> AUDIT
     
     %% Runtime Package Connections
     CLIRT --> RUNTIME
@@ -103,6 +117,8 @@ graph TB
     CTRLRT --> RUNTIME
     CTRLRT --> CLIENT
     CTRLRT --> EVENTS
+    CTRLRT --> PLUGIN
+    PLUGIN -.->|Restricted| CLIENT
     
     %% Core Runtime Connections
     RUNTIME --> CLIENT
@@ -111,6 +127,7 @@ graph TB
     RUNTIME --> VALIDATION
     RUNTIME --> DEFAULTING
     RUNTIME --> INFORMERS
+    RUNTIME -.->|When RBAC| AUTHZ
     
     %% Client Connections
     CLIENT --> STORAGE
@@ -119,6 +136,7 @@ graph TB
     CLIENT --> EVENTS
     CLIENT --> VALIDATION
     CLIENT --> DEFAULTING
+    CLIENT -.->|Access Logs| AUDIT
     
     %% Resource Management Connections
     REGISTRY --> SCHEME
@@ -126,11 +144,13 @@ graph TB
     DEFAULTING --> SCHEME
     INFORMERS --> CLIENT
     INFORMERS --> STORAGE
+    INFORMERS -.->|Filter by| AUTHZ
     
     %% Events Connections
     EVENTS --> STORAGE
     EVENTS --> CODEC
     EVENTS --> SCHEME
+    EVENTS -.->|Security Events| AUDIT
     
     %% Core Infrastructure Connections
     STORAGE --> FACTORY
@@ -142,6 +162,7 @@ graph TB
     
     %% Styling
     classDef appLayer fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef securityLayer fill:#ffebee,stroke:#b71c1c,stroke-width:2px,stroke-dasharray: 5 5
     classDef runtimePkg fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
     classDef coreRuntime fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
     classDef resourceMgmt fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
@@ -150,7 +171,8 @@ graph TB
     classDef storageBackend fill:#fff8e1,stroke:#f57f17,stroke-width:2px
     
     class CLI,TRIGGER appLayer
-    class CLIRT,CTRLRT runtimePkg
+    class AUTH,AUTHZ,AUDIT securityLayer
+    class CLIRT,CTRLRT,PLUGIN runtimePkg
     class RUNTIME,CLIENT,EVENTS coreRuntime
     class REGISTRY,VALIDATION,DEFAULTING,INFORMERS resourceMgmt
     class CODEC,SCHEME,STORAGE coreInfra
@@ -339,7 +361,7 @@ type Runtime interface {
 ### 2. Client Interface
 **Location:** `core/pkg/client/`
 
-Kubernetes controller-runtime compatible client implementation.
+Kubernetes controller-runtime compatible client implementation with optional RBAC integration.
 
 ```go
 // Controller-runtime compatible
@@ -351,6 +373,14 @@ type Client interface {
     Update(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error
     Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error
 }
+
+// AuthenticatedClient wraps standard client with RBAC (when enabled)
+type AuthenticatedClient struct {
+    Client
+    userInfo   auth.UserInfo
+    authorizer auth.Authorizer
+    auditor    audit.Interface
+}
 ```
 
 **Features:**
@@ -358,6 +388,8 @@ type Client interface {
 - Strategic merge patch support
 - Status subresource handling
 - Watch capability integration
+- Optional RBAC permission checks
+- Audit logging support
 
 ### 3. Storage Interface
 **Location:** `core/pkg/storage/`
@@ -413,7 +445,7 @@ type Defaulter interface {
 ### Kubernetes Event System
 **Location:** `core/pkg/events/`
 
-Complete Kubernetes-compatible event system implementation.
+Complete Kubernetes-compatible event system implementation with RBAC integration.
 
 ```go
 // Event Recorder Interface (Kubernetes compatible)
@@ -443,6 +475,8 @@ type StorageSink interface {
 - Multi-sink event broadcasting
 - Storage sink for persistence
 - Integration with k1s client and storage
+- User attribution in events (when RBAC enabled)
+- Security event recording for audit trail
 
 ## Performance Targets
 
@@ -536,6 +570,57 @@ func main() {
 }
 ```
 
+## RBAC Integration (Optional)
+
+### Progressive Security Model
+**Location:** `core/pkg/auth/`, `core/pkg/auth/rbac/`
+
+K1S includes an optional RBAC layer that can be progressively enabled without breaking existing functionality.
+
+```go
+// RBAC Configuration
+type RBACConfig struct {
+    Enabled      bool              // RBAC disabled by default
+    AuthConfig   AuthConfig        // Authentication configuration
+    PolicyStore  PolicyStoreConfig // Policy storage configuration  
+    DefaultPolicy string           // "allow" or "deny" for unauthenticated
+}
+
+// Authentication supports multiple providers
+type Authenticator interface {
+    Authenticate(ctx context.Context, token string) (*UserInfo, error)
+    AuthenticateServiceAccount(ctx context.Context, sa *corev1.ServiceAccount, token string) (*UserInfo, error)
+}
+
+// Authorization using standard Kubernetes RBAC
+type Authorizer interface {
+    Authorize(ctx context.Context, attrs AuthorizationAttributes) (Decision, string, error)
+}
+```
+
+**Features:**
+- **Backward Compatible:** RBAC disabled by default, existing apps work unchanged
+- **Standard Kubernetes RBAC:** Uses `k8s.io/api/rbac/v1` types directly
+- **Progressive Enablement:** Can be enabled via configuration
+- **Multiple Auth Providers:** File-based, OIDC, ServiceAccounts
+- **Plugin Security:** Restricted clients for plugins with scoped permissions
+- **Audit Support:** Optional audit logging for compliance
+
+### Plugin Security Architecture
+
+When RBAC is enabled, plugins run with restricted permissions:
+
+```go
+type RestrictedPluginClient struct {
+    base              client.Client
+    authorizer        auth.Authorizer
+    pluginCtx         auth.PluginContext
+    allowedResources  []string
+    allowedVerbs      []string
+    allowedNamespaces []string
+}
+```
+
 ## Architecture Benefits
 
 This architecture provides:
@@ -548,5 +633,7 @@ This architecture provides:
 6. **Easy CLI Integration:** CLI-runtime package for command-line tool development
 7. **Embedded Storage:** Multiple storage backends optimized for different use cases
 8. **Modular Design:** Clean separation allowing applications to use only needed components
+9. **Progressive Security:** Optional RBAC layer with standard Kubernetes RBAC resources
+10. **Enterprise Ready:** Support for authentication, authorization, audit logging, and plugin security
 
-This enables building both CLI tools and controller applications with embedded storage while maintaining full compatibility with the Kubernetes ecosystem and optimizing for CLI-specific performance requirements.
+This enables building both CLI tools and controller applications with embedded storage while maintaining full compatibility with the Kubernetes ecosystem, optimizing for CLI-specific performance requirements, and providing enterprise-grade security when needed.

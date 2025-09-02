@@ -1,14 +1,16 @@
-# K1S RBAC Architecture
+# K1S RBAC Architecture - Detailed Reference
+
+> **Note:** This document provides detailed implementation reference for the RBAC layer. For the high-level integration, see the [main Architecture document](Architecture.md#rbac-integration-optional).
 
 **Related Documentation:**
-- [Architecture](Architecture.md) - Complete k1s system architecture
+- [Architecture](Architecture.md) - Complete k1s system architecture with RBAC integration overview
 - [Core Resources Architecture](Core-Resources-Architecture.md) - Core resources integration with RBAC
 - [Kubernetes Compatibility](Kubernetes-Compatibility.md) - Kubernetes interface compatibility
 - [Controller-Runtime Package](Controller-Runtime-Package.md) - Controller runtime integration
 
 ## Overview
 
-K1S includes an RBAC (Role-Based Access Control) layer designed from the ground up to support multi-user CLI scenarios, plugin security, and enterprise integration. The architecture is **forward-compatible** and can be enabled progressively without breaking existing functionality.
+This document provides detailed implementation reference for K1S's RBAC (Role-Based Access Control) layer. The RBAC system is designed to support multi-user CLI scenarios, plugin security, and enterprise integration. The architecture is **forward-compatible** and can be enabled progressively without breaking existing functionality.
 
 ## Design Principles
 
@@ -32,13 +34,15 @@ K1S includes an RBAC (Role-Based Access Control) layer designed from the ground 
 - Process-level isolation
 - Resource-scoped access control
 
-## Core Architecture
+## Implementation Details
 
-### RBAC Layer Integration
+> **Note:** The architectural overview and integration diagram are shown in the [main Architecture document](Architecture.md#system-architecture). This section focuses on implementation specifics.
+
+### RBAC Component Details
 
 ```mermaid
 graph TB
-    subgraph "K1S RBAC-Enabled Architecture"
+    subgraph "RBAC Implementation Components"
         subgraph "Authentication Layer"
             AUTH[Authentication<br/>• File-based<br/>• OIDC<br/>• External IDP]
             IDENTITY[Identity Resolver<br/>• User Info<br/>• Group Membership<br/>• Token Validation]
