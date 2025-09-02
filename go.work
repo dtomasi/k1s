@@ -1,9 +1,5 @@
 go 1.25.0
 
 use (
-    ./core
-    ./storage/memory
-    ./storage/pebble
-    ./tools
-    ./examples
+
 )
