@@ -6,8 +6,7 @@ on:
   pull_request:
     branches: [ main ]
 
-env:
-  GO_VERSION: '1.25.0'
+# Tools are managed by Hermit - single source of truth for versions
 
 jobs:
   # Format and basic checks
@@ -19,31 +18,34 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ env.GO_VERSION }}
-        cache: true
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@v1
+        with:
+          cache: true
 
-    - name: Download dependencies
-      run: go work sync
+      - name: Verify Go installation
+        run: |
+          go version
+          which go
 
-    - name: Check formatting
-      run: |
-        if [ -n "$(gofmt -l .)" ]; then
-          echo "Code is not formatted. Please run 'gofmt -w .'"
-          gofmt -l .
-          exit 1
-        fi
+      - name: Download dependencies
+        run: go work sync
 
-    - name: Check imports
-      run: |
-        go install golang.org/x/tools/cmd/goimports@latest
-        if [ -n "$(goimports -l .)" ]; then
-          echo "Imports are not formatted. Please run 'goimports -w .'"
-          goimports -l .
-          exit 1
-        fi
+      - name: Check formatting
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "Code is not formatted. Please run 'gofmt -w .'"
+            gofmt -l .
+            exit 1
+          fi
+
+      - name: Check imports
+        run: |
+          if [ -n "$(goimports -l .)" ]; then
+            echo "Imports are not formatted. Please run 'goimports -w .'"
+            goimports -l .
+            exit 1
+          fi
 
   # Comprehensive linting with golangci-lint
   lint:
@@ -55,49 +57,43 @@ jobs:
     - name: Check out code
       uses: actions/checkout@v5
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
+    - name: Activate Hermit
+      uses: cashapp/activate-hermit@v1
       with:
-        go-version: ${{ env.GO_VERSION }}
         cache: true
+
+    - name: Verify Go installation
+      run: |
+        go version
+        which go
 
     - name: Download dependencies
       run: go work sync
 
     - name: Run golangci-lint - Core
-      uses: golangci/golangci-lint-action@v8
-      with:
-        version: v1.60
-        working-directory: core
-        args: --timeout=10m --config=../.golangci.yml
+      run: |
+        cd core
+        golangci-lint run --timeout=10m --config=../.golangci.yml
 
     - name: Run golangci-lint - Memory Storage
-      uses: golangci/golangci-lint-action@v8
-      with:
-        version: v1.60
-        working-directory: storage/memory
-        args: --timeout=10m --config=../../.golangci.yml
+      run: |
+        cd storage/memory
+        golangci-lint run --timeout=10m --config=../../.golangci.yml
 
     - name: Run golangci-lint - Pebble Storage
-      uses: golangci/golangci-lint-action@v8
-      with:
-        version: v1.60
-        working-directory: storage/pebble
-        args: --timeout=10m --config=../../.golangci.yml
+      run: |
+        cd storage/pebble
+        golangci-lint run --timeout=10m --config=../../.golangci.yml
 
     - name: Run golangci-lint - Tools
-      uses: golangci/golangci-lint-action@v8
-      with:
-        version: v1.60
-        working-directory: tools
-        args: --timeout=10m --config=../.golangci.yml
+      run: |
+        cd tools
+        golangci-lint run --timeout=10m --config=../.golangci.yml
 
     - name: Run golangci-lint - Examples
-      uses: golangci/golangci-lint-action@v8
-      with:
-        version: v1.60
-        working-directory: examples
-        args: --timeout=10m --config=../.golangci.yml
+      run: |
+        cd examples
+        golangci-lint run --timeout=10m --config=../.golangci.yml
 
   # Multi-platform testing
   test:
@@ -112,44 +108,47 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ env.GO_VERSION }}
-        cache: true
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@v1
+        with:
+          cache: true
 
-    - name: Download dependencies
-      run: go work sync
+      - name: Verify Go installation
+        run: |
+          go version
 
-    - name: Run tests - Core
-      run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
-      working-directory: core
+      - name: Download dependencies
+        run: go work sync
 
-    - name: Run tests - Memory Storage
-      run: go test -race -coverprofile=coverage-memory.out -covermode=atomic ./...
-      working-directory: storage/memory
+      - name: Run tests - Core
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+        working-directory: core
 
-    - name: Run tests - Pebble Storage
-      run: go test -race -coverprofile=coverage-pebble.out -covermode=atomic ./...
-      working-directory: storage/pebble
+      - name: Run tests - Memory Storage
+        run: go test -race -coverprofile=coverage-memory.out -covermode=atomic ./...
+        working-directory: storage/memory
 
-    - name: Run tests - Tools
-      run: go test -race -coverprofile=coverage-tools.out -covermode=atomic ./...
-      working-directory: tools
+      - name: Run tests - Pebble Storage
+        run: go test -race -coverprofile=coverage-pebble.out -covermode=atomic ./...
+        working-directory: storage/pebble
 
-    - name: Run tests - Examples
-      run: go test -race -coverprofile=coverage-examples.out -covermode=atomic ./...
-      working-directory: examples
+      - name: Run tests - Tools
+        run: go test -race -coverprofile=coverage-tools.out -covermode=atomic ./...
+        working-directory: tools
 
-    - name: Upload coverage to Codecov (Ubuntu only)
-      if: matrix.os == 'ubuntu-latest'
-      uses: codecov/codecov-action@v5
-      with:
-        files: ./core/coverage.out,./storage/memory/coverage-memory.out,./storage/pebble/coverage-pebble.out,./tools/coverage-tools.out,./examples/coverage-examples.out
-        fail_ci_if_error: true
-        verbose: true
-      env:
-        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      - name: Run tests - Examples
+        run: go test -race -coverprofile=coverage-examples.out -covermode=atomic ./...
+        working-directory: examples
+
+      - name: Upload coverage to Codecov (Ubuntu only)
+        if: matrix.os == 'ubuntu-latest'
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./core/coverage.out,./storage/memory/coverage-memory.out,./storage/pebble/coverage-pebble.out,./tools/coverage-tools.out,./examples/coverage-examples.out
+          fail_ci_if_error: true
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   # Coverage enforcement (70% minimum)
   coverage:
@@ -161,11 +160,15 @@ jobs:
     - name: Check out code
       uses: actions/checkout@v5
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
+    - name: Activate Hermit
+      uses: cashapp/activate-hermit@v1
       with:
-        go-version: ${{ env.GO_VERSION }}
         cache: true
+
+    - name: Verify Go installation
+      run: |
+        go version
+        which go
 
     - name: Download dependencies
       run: go work sync
@@ -223,11 +226,15 @@ jobs:
     - name: Check out code
       uses: actions/checkout@v5
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
+    - name: Activate Hermit
+      uses: cashapp/activate-hermit@v1
       with:
-        go-version: ${{ env.GO_VERSION }}
         cache: true
+
+    - name: Verify Go installation
+      run: |
+        go version
+        which go
 
     - name: Download dependencies
       run: go work sync
@@ -284,26 +291,30 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ env.GO_VERSION }}
-        cache: true
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@v1
+        with:
+          cache: true
 
-    - name: Download dependencies
-      run: go work sync
+      - name: Verify Go installation
+        run: |
+          go version
+          which go
 
-    - name: Run benchmarks - Core
-      run: go test -bench=. -benchmem -run=^$ ./... || echo "No benchmarks in core yet"
-      working-directory: core
+      - name: Download dependencies
+        run: go work sync
 
-    - name: Run benchmarks - Storage backends
-      run: |
-        echo "=== Memory Storage Benchmarks (Target: >10,000 ops/sec) ==="
-        cd storage/memory && go test -bench=. -benchmem -run=^$ ./... || echo "No benchmarks yet"
-        
-        echo "=== Pebble Storage Benchmarks (Target: >3,000 ops/sec) ==="  
-        cd ../pebble && go test -bench=. -benchmem -run=^$ ./... || echo "No benchmarks yet"
+      - name: Run benchmarks - Core
+        run: go test -bench=. -benchmem -run=^$ ./... || echo "No benchmarks in core yet"
+        working-directory: core
+
+      - name: Run benchmarks - Storage backends
+        run: |
+          echo "=== Memory Storage Benchmarks (Target: >10,000 ops/sec) ==="
+          cd storage/memory && go test -bench=. -benchmem -run=^$ ./... || echo "No benchmarks yet"
+          
+          echo "=== Pebble Storage Benchmarks (Target: >3,000 ops/sec) ==="  
+          cd ../pebble && go test -bench=. -benchmem -run=^$ ./... || echo "No benchmarks yet"
 
   # Security scanning
   security:
@@ -314,22 +325,26 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ env.GO_VERSION }}
-        cache: true
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@v1
+        with:
+          cache: true
 
-    - name: Download dependencies
-      run: go work sync
+      - name: Verify Go installation
+        run: |
+          go version
+          which go
 
-    - name: Run gosec security scan
-      run: |
-        go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
-        gosec -fmt sarif -out gosec-report.sarif -stdout ./... || echo "Security scan completed with findings"
+      - name: Download dependencies
+        run: go work sync
 
-    - name: Upload SARIF file
-      uses: github/codeql-action/upload-sarif@v3
-      if: always()
-      with:
-        sarif_file: gosec-report.sarif
+      - name: Run gosec security scan
+        run: |
+          go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
+          gosec -fmt sarif -out gosec-report.sarif -stdout ./... || echo "Security scan completed with findings"
+
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: gosec-report.sarif
