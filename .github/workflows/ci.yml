@@ -65,35 +65,35 @@ jobs:
       run: go work sync
 
     - name: Run golangci-lint - Core
-      uses: golangci/golangci-lint-action@v6
+      uses: golangci/golangci-lint-action@v8
       with:
         version: v1.60
         working-directory: core
         args: --timeout=10m --config=../.golangci.yml
 
     - name: Run golangci-lint - Memory Storage
-      uses: golangci/golangci-lint-action@v6
+      uses: golangci/golangci-lint-action@v8
       with:
         version: v1.60
         working-directory: storage/memory
         args: --timeout=10m --config=../../.golangci.yml
 
     - name: Run golangci-lint - Pebble Storage
-      uses: golangci/golangci-lint-action@v6
+      uses: golangci/golangci-lint-action@v8
       with:
         version: v1.60
         working-directory: storage/pebble
         args: --timeout=10m --config=../../.golangci.yml
 
     - name: Run golangci-lint - Tools
-      uses: golangci/golangci-lint-action@v6
+      uses: golangci/golangci-lint-action@v8
       with:
         version: v1.60
         working-directory: tools
         args: --timeout=10m --config=../.golangci.yml
 
     - name: Run golangci-lint - Examples
-      uses: golangci/golangci-lint-action@v6
+      uses: golangci/golangci-lint-action@v8
       with:
         version: v1.60
         working-directory: examples
