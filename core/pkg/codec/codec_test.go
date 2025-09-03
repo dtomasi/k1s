@@ -148,6 +148,44 @@ var _ = Describe("Codec", func() {
 				Expect(univDeser.Identifier()).To(Equal(runtime.Identifier("universal")))
 			}
 		})
+
+		It("should create encoder for version", func() {
+			jsonCodec := codec.NewJSONCodec(scheme)
+			encoder := codecFactory.EncoderForVersion(jsonCodec, nil)
+			Expect(encoder).To(Equal(jsonCodec))
+		})
+
+		It("should create decoder to version", func() {
+			jsonCodec := codec.NewJSONCodec(scheme)
+			decoder := codecFactory.DecoderToVersion(jsonCodec, nil)
+			Expect(decoder).To(Equal(jsonCodec))
+		})
+
+		It("should create legacy codec", func() {
+			testGV := schema.GroupVersion{Group: "test.k1s.io", Version: "v1alpha1"}
+			legacyCodec := codecFactory.LegacyCodec(testGV)
+			Expect(legacyCodec).ToNot(BeNil())
+			// Legacy codec should return JSONCodec
+			if jsonCodec, ok := legacyCodec.(*codec.JSONCodec); ok {
+				Expect(jsonCodec.Identifier()).To(Equal(runtime.Identifier("json")))
+			}
+		})
+
+		It("should create codec for versions", func() {
+			jsonEncoder := codec.NewJSONCodec(scheme)
+			jsonDecoder := codec.NewJSONCodec(scheme)
+			versionCodec := codecFactory.CodecForVersions(jsonEncoder, jsonDecoder, nil, nil)
+			Expect(versionCodec).ToNot(BeNil())
+			// Should return JSONCodec
+			if jsonCodec, ok := versionCodec.(*codec.JSONCodec); ok {
+				Expect(jsonCodec.Identifier()).To(Equal(runtime.Identifier("json")))
+			}
+		})
+
+		It("should return self for without conversion", func() {
+			negotiated := codecFactory.WithoutConversion()
+			Expect(negotiated).To(Equal(codecFactory))
+		})
 	})
 
 	Describe("JSON Codec", func() {
@@ -159,6 +197,22 @@ var _ = Describe("Codec", func() {
 
 		It("should have correct identifier", func() {
 			Expect(jsonCodec.Identifier()).To(Equal(runtime.Identifier("json")))
+		})
+
+		It("should create pretty JSON codec", func() {
+			prettyCodec := codec.NewPrettyJSONCodec(scheme)
+			Expect(prettyCodec).ToNot(BeNil())
+			Expect(prettyCodec.Identifier()).To(Equal(runtime.Identifier("json")))
+
+			// Test that it actually produces pretty JSON
+			var buf bytes.Buffer
+			err := prettyCodec.Encode(testObj, &buf)
+			Expect(err).ToNot(HaveOccurred())
+
+			// Pretty JSON should contain newlines and indentation
+			jsonStr := buf.String()
+			Expect(jsonStr).To(ContainSubstring("\n"))
+			Expect(jsonStr).To(ContainSubstring("  "))
 		})
 
 		It("should encode object to JSON", func() {
@@ -398,6 +452,39 @@ spec:
 			Expect(recognized).To(BeFalse())
 			Expect(unknown).To(BeFalse())
 		})
+
+		It("should have correct identifier", func() {
+			Expect(serializer.Identifier()).To(Equal(runtime.Identifier("json")))
+		})
+
+		It("should encode object through serializer interface", func() {
+			var buf bytes.Buffer
+			err := serializer.Encode(testObj, &buf)
+			Expect(err).ToNot(HaveOccurred())
+
+			var decoded map[string]interface{}
+			err = json.Unmarshal(buf.Bytes(), &decoded)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(decoded["apiVersion"]).To(Equal("test.k1s.io/v1alpha1"))
+			Expect(decoded["kind"]).To(Equal("TestObject"))
+		})
+
+		It("should decode object through serializer interface", func() {
+			jsonData := `{
+				"apiVersion": "test.k1s.io/v1alpha1",
+				"kind": "TestObject",
+				"metadata": {"name": "serializer-test"},
+				"spec": {"name": "Serializer Test", "value": 300}
+			}`
+
+			decoded, gvk, err := serializer.Decode([]byte(jsonData), nil, nil)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(*gvk).To(Equal(testGVK))
+
+			decodedObj := decoded.(*TestObject)
+			Expect(decodedObj.Name).To(Equal("serializer-test"))
+			Expect(decodedObj.Spec.Value).To(Equal(int32(300)))
+		})
 	})
 
 	Describe("YAMLSerializer", func() {
@@ -432,6 +519,42 @@ kind: TestObject`
 			Expect(err).ToNot(HaveOccurred())
 			Expect(recognized).To(BeFalse())
 			Expect(unknown).To(BeFalse())
+		})
+
+		It("should have correct identifier", func() {
+			Expect(serializer.Identifier()).To(Equal(runtime.Identifier("yaml")))
+		})
+
+		It("should encode object through serializer interface", func() {
+			var buf bytes.Buffer
+			err := serializer.Encode(testObj, &buf)
+			Expect(err).ToNot(HaveOccurred())
+
+			// Parse YAML to verify structure
+			var decoded map[string]interface{}
+			err = yaml.Unmarshal(buf.Bytes(), &decoded)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(decoded["apiVersion"]).To(Equal("test.k1s.io/v1alpha1"))
+			Expect(decoded["kind"]).To(Equal("TestObject"))
+		})
+
+		It("should decode object through serializer interface", func() {
+			yamlData := `
+apiVersion: test.k1s.io/v1alpha1
+kind: TestObject
+metadata:
+  name: yaml-serializer-test
+spec:
+  name: YAML Serializer Test
+  value: 400`
+
+			decoded, gvk, err := serializer.Decode([]byte(yamlData), nil, nil)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(*gvk).To(Equal(testGVK))
+
+			decodedObj := decoded.(*TestObject)
+			Expect(decodedObj.Name).To(Equal("yaml-serializer-test"))
+			Expect(decodedObj.Spec.Value).To(Equal(int32(400)))
 		})
 	})
 
