@@ -13,6 +13,11 @@ import (
 	k1sstorage "github.com/dtomasi/k1s/core/pkg/storage"
 )
 
+// Test constants for benchmark test object name
+const (
+	benchmarkObjectName = "benchmark-object"
+)
+
 // BenchmarkPebbleStorage_Create measures create operation performance
 func BenchmarkPebbleStorage_Create(b *testing.B) {
 	ctx := context.Background()
@@ -20,21 +25,29 @@ func BenchmarkPebbleStorage_Create(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() {
+		if err := os.RemoveAll(tempDir); err != nil {
+			b.Logf("Warning: failed to remove temp dir: %v", err)
+		}
+	}()
 
 	config := k1sstorage.Config{}
 
 	storage := NewPebbleStorageWithPath(tempDir, config)
-	defer storage.Close()
+	defer func() {
+		if err := storage.Close(); err != nil {
+			b.Logf("Warning: failed to close storage: %v", err)
+		}
+	}()
 
 	testObject := &TestObject{
 		TypeMeta: metav1.TypeMeta{
-			APIVersion: "test/v1",
-			Kind:       "TestObject",
+			APIVersion: testAPIVersion,
+			Kind:       testObjectKind,
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "benchmark-object",
-			Namespace: "default",
+			Name:      benchmarkObjectName,
+			Namespace: testNamespace,
 		},
 		Spec: TestSpec{
 			Name:        "Benchmark Object",
@@ -69,21 +82,29 @@ func BenchmarkPebbleStorage_Get(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() {
+		if err := os.RemoveAll(tempDir); err != nil {
+			b.Logf("Warning: failed to remove temp dir: %v", err)
+		}
+	}()
 
 	config := k1sstorage.Config{}
 
 	storage := NewPebbleStorageWithPath(tempDir, config)
-	defer storage.Close()
+	defer func() {
+		if err := storage.Close(); err != nil {
+			b.Logf("Warning: failed to close storage: %v", err)
+		}
+	}()
 
 	testObject := &TestObject{
 		TypeMeta: metav1.TypeMeta{
-			APIVersion: "test/v1",
-			Kind:       "TestObject",
+			APIVersion: testAPIVersion,
+			Kind:       testObjectKind,
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "benchmark-object",
-			Namespace: "default",
+			Name:      benchmarkObjectName,
+			Namespace: testNamespace,
 		},
 		Spec: TestSpec{
 			Name:        "Benchmark Object",
@@ -130,21 +151,29 @@ func BenchmarkPebbleStorage_Delete(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() {
+		if err := os.RemoveAll(tempDir); err != nil {
+			b.Logf("Warning: failed to remove temp dir: %v", err)
+		}
+	}()
 
 	config := k1sstorage.Config{}
 
 	storage := NewPebbleStorageWithPath(tempDir, config)
-	defer storage.Close()
+	defer func() {
+		if err := storage.Close(); err != nil {
+			b.Logf("Warning: failed to close storage: %v", err)
+		}
+	}()
 
 	testObject := &TestObject{
 		TypeMeta: metav1.TypeMeta{
-			APIVersion: "test/v1",
-			Kind:       "TestObject",
+			APIVersion: testAPIVersion,
+			Kind:       testObjectKind,
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "benchmark-object",
-			Namespace: "default",
+			Name:      benchmarkObjectName,
+			Namespace: testNamespace,
 		},
 		Spec: TestSpec{
 			Name:        "Benchmark Object",
@@ -190,21 +219,29 @@ func BenchmarkPebbleStorage_List(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() {
+		if err := os.RemoveAll(tempDir); err != nil {
+			b.Logf("Warning: failed to remove temp dir: %v", err)
+		}
+	}()
 
 	config := k1sstorage.Config{}
 
 	storage := NewPebbleStorageWithPath(tempDir, config)
-	defer storage.Close()
+	defer func() {
+		if err := storage.Close(); err != nil {
+			b.Logf("Warning: failed to close storage: %v", err)
+		}
+	}()
 
 	testObject := &TestObject{
 		TypeMeta: metav1.TypeMeta{
-			APIVersion: "test/v1",
-			Kind:       "TestObject",
+			APIVersion: testAPIVersion,
+			Kind:       testObjectKind,
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "benchmark-object",
-			Namespace: "default",
+			Name:      benchmarkObjectName,
+			Namespace: testNamespace,
 		},
 		Spec: TestSpec{
 			Name:        "Benchmark Object",
@@ -230,8 +267,8 @@ func BenchmarkPebbleStorage_List(b *testing.B) {
 
 	testList := &TestObjectList{
 		TypeMeta: metav1.TypeMeta{
-			APIVersion: "test/v1",
-			Kind:       "TestObjectList",
+			APIVersion: testAPIVersion,
+			Kind:       testObjectListKind,
 		},
 	}
 
@@ -255,21 +292,29 @@ func BenchmarkPebbleStorage_ConcurrentOperations(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() {
+		if err := os.RemoveAll(tempDir); err != nil {
+			b.Logf("Warning: failed to remove temp dir: %v", err)
+		}
+	}()
 
 	config := k1sstorage.Config{}
 
 	storage := NewPebbleStorageWithPath(tempDir, config)
-	defer storage.Close()
+	defer func() {
+		if err := storage.Close(); err != nil {
+			b.Logf("Warning: failed to close storage: %v", err)
+		}
+	}()
 
 	testObject := &TestObject{
 		TypeMeta: metav1.TypeMeta{
-			APIVersion: "test/v1",
-			Kind:       "TestObject",
+			APIVersion: testAPIVersion,
+			Kind:       testObjectKind,
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "benchmark-object",
-			Namespace: "default",
+			Name:      benchmarkObjectName,
+			Namespace: testNamespace,
 		},
 		Spec: TestSpec{
 			Name:        "Benchmark Object",
@@ -308,21 +353,29 @@ func BenchmarkPebbleStorage_MixedOperations(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() {
+		if err := os.RemoveAll(tempDir); err != nil {
+			b.Logf("Warning: failed to remove temp dir: %v", err)
+		}
+	}()
 
 	config := k1sstorage.Config{}
 
 	storage := NewPebbleStorageWithPath(tempDir, config)
-	defer storage.Close()
+	defer func() {
+		if err := storage.Close(); err != nil {
+			b.Logf("Warning: failed to close storage: %v", err)
+		}
+	}()
 
 	testObject := &TestObject{
 		TypeMeta: metav1.TypeMeta{
-			APIVersion: "test/v1",
-			Kind:       "TestObject",
+			APIVersion: testAPIVersion,
+			Kind:       testObjectKind,
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "benchmark-object",
-			Namespace: "default",
+			Name:      benchmarkObjectName,
+			Namespace: testNamespace,
 		},
 		Spec: TestSpec{
 			Name:        "Benchmark Object",
@@ -393,21 +446,29 @@ func BenchmarkPebbleStorage_HighThroughput(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() {
+		if err := os.RemoveAll(tempDir); err != nil {
+			b.Logf("Warning: failed to remove temp dir: %v", err)
+		}
+	}()
 
 	config := k1sstorage.Config{}
 
 	storage := NewPebbleStorageWithPath(tempDir, config)
-	defer storage.Close()
+	defer func() {
+		if err := storage.Close(); err != nil {
+			b.Logf("Warning: failed to close storage: %v", err)
+		}
+	}()
 
 	testObject := &TestObject{
 		TypeMeta: metav1.TypeMeta{
-			APIVersion: "test/v1",
-			Kind:       "TestObject",
+			APIVersion: testAPIVersion,
+			Kind:       testObjectKind,
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "benchmark-object",
-			Namespace: "default",
+			Name:      benchmarkObjectName,
+			Namespace: testNamespace,
 		},
 		Spec: TestSpec{
 			Name:        "Benchmark Object",
@@ -462,21 +523,29 @@ func BenchmarkPebbleStorage_LowLatency(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() {
+		if err := os.RemoveAll(tempDir); err != nil {
+			b.Logf("Warning: failed to remove temp dir: %v", err)
+		}
+	}()
 
 	config := k1sstorage.Config{}
 
 	storage := NewPebbleStorageWithPath(tempDir, config)
-	defer storage.Close()
+	defer func() {
+		if err := storage.Close(); err != nil {
+			b.Logf("Warning: failed to close storage: %v", err)
+		}
+	}()
 
 	testObject := &TestObject{
 		TypeMeta: metav1.TypeMeta{
-			APIVersion: "test/v1",
-			Kind:       "TestObject",
+			APIVersion: testAPIVersion,
+			Kind:       testObjectKind,
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "benchmark-object",
-			Namespace: "default",
+			Name:      benchmarkObjectName,
+			Namespace: testNamespace,
 		},
 		Spec: TestSpec{
 			Name:        "Benchmark Object",
@@ -533,21 +602,29 @@ func BenchmarkPebbleStorage_CompactedOperations(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() {
+		if err := os.RemoveAll(tempDir); err != nil {
+			b.Logf("Warning: failed to remove temp dir: %v", err)
+		}
+	}()
 
 	config := k1sstorage.Config{}
 
 	storage := NewPebbleStorageWithPath(tempDir, config)
-	defer storage.Close()
+	defer func() {
+		if err := storage.Close(); err != nil {
+			b.Logf("Warning: failed to close storage: %v", err)
+		}
+	}()
 
 	testObject := &TestObject{
 		TypeMeta: metav1.TypeMeta{
-			APIVersion: "test/v1",
-			Kind:       "TestObject",
+			APIVersion: testAPIVersion,
+			Kind:       testObjectKind,
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "benchmark-object",
-			Namespace: "default",
+			Name:      benchmarkObjectName,
+			Namespace: testNamespace,
 		},
 		Spec: TestSpec{
 			Name:        "Benchmark Object",
