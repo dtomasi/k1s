@@ -336,8 +336,8 @@ func TestMemoryStorage_Preconditions(t *testing.T) {
 	// Create test object
 	obj := &TestObject{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-obj",
-			UID:  types.UID("test-uid"),
+			Name:            "test-obj",
+			UID:             types.UID("test-uid"),
 			ResourceVersion: "1",
 		},
 		Data: "test data",
@@ -545,7 +545,7 @@ func TestMemoryStorage_RemoveWatcher(t *testing.T) {
 	// Cancel context to trigger removeWatcher
 	ctxWithCancel, cancel := context.WithCancel(ctx)
 	defer cancel()
-	
+
 	w2, err := s.Watch(ctxWithCancel, "test/", storage.ListOptions{})
 	if err != nil {
 		t.Fatalf("Second watch failed: %v", err)
@@ -610,7 +610,7 @@ func TestMemoryStorage_CreateErrors(t *testing.T) {
 	// Test with object that fails versioner operations
 	// We'll mock this by using an object that can't be processed
 	badObj := &runtime.Unknown{}
-	
+
 	err := s.Create(ctx, "bad-key", badObj, nil, 0)
 	// This should fail during versioner operations, increasing error count
 	if err == nil {
@@ -633,7 +633,7 @@ func TestMemoryStorage_WatcherNotification(t *testing.T) {
 
 	// Test that notifyWatchers and related watcher functions are exercised
 	// This is a coverage test to ensure these functions are called
-	
+
 	// Start multiple watchers to test different notification paths
 	w1, err := s.Watch(ctx, "test/", storage.ListOptions{Recursive: true})
 	if err != nil {
@@ -721,7 +721,7 @@ func TestMemoryStorage_ListUpdateError(t *testing.T) {
 	if err == nil {
 		t.Log("List succeeded with invalid list object - error handling may be different than expected")
 	}
-	
+
 	// At minimum, verify the operation was attempted
 	ops, errors, _ := s.GetMetrics()
 	t.Logf("After list operation - Operations: %d, Errors: %d", ops, errors)
