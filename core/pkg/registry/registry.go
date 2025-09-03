@@ -36,9 +36,9 @@ type resourceRegistry struct {
 // NewRegistry creates a new resource registry with optional configuration.
 func NewRegistry(opts ...RegistryOption) Registry {
 	config := registryConfig{
-		DefaultCategories:           []string{"all"},
-		EnableShortNameValidation:   true,
-		CaseSensitiveShortNames:     false,
+		DefaultCategories:         []string{"all"},
+		EnableShortNameValidation: true,
+		CaseSensitiveShortNames:   false,
 	}
 
 	for _, opt := range opts {

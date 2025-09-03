@@ -15,20 +15,20 @@ import (
 var _ = Describe("Registry", func() {
 	var (
 		reg registry.Registry
-		
+
 		// Test GVRs
 		itemGVR = schema.GroupVersionResource{
 			Group:    "test.k1s.io",
 			Version:  "v1alpha1",
 			Resource: "items",
 		}
-		
+
 		categoryGVR = schema.GroupVersionResource{
 			Group:    "test.k1s.io",
-			Version:  "v1alpha1", 
+			Version:  "v1alpha1",
 			Resource: "categories",
 		}
-		
+
 		// Test GVKs
 		itemGVK = schema.GroupVersionKind{
 			Group:   "test.k1s.io",
@@ -60,14 +60,14 @@ var _ = Describe("Registry", func() {
 	Describe("RegisterResource", func() {
 		It("should register a resource with complete configuration", func() {
 			config := registry.ResourceConfig{
-				Singular:     "item",
-				Plural:       "items",
-				Kind:         "Item",
-				ListKind:     "ItemList",
-				Namespaced:   true,
-				Description:  "Test item resource",
-				ShortNames:   []string{"itm", "it"},
-				Categories:   []string{"inventory", "all"},
+				Singular:    "item",
+				Plural:      "items",
+				Kind:        "Item",
+				ListKind:    "ItemList",
+				Namespaced:  true,
+				Description: "Test item resource",
+				ShortNames:  []string{"itm", "it"},
+				Categories:  []string{"inventory", "all"},
 				PrintColumns: []metav1.TableColumnDefinition{
 					{
 						Name:        "Name",
@@ -78,7 +78,7 @@ var _ = Describe("Registry", func() {
 					},
 					{
 						Name:        "Description",
-						Type:        "string", 
+						Type:        "string",
 						Format:      "",
 						Description: "Item description",
 						Priority:    1,
@@ -94,7 +94,7 @@ var _ = Describe("Registry", func() {
 		It("should auto-generate ListKind if not provided", func() {
 			config := registry.ResourceConfig{
 				Singular: "item",
-				Plural:   "items", 
+				Plural:   "items",
 				Kind:     "Item",
 			}
 
@@ -124,7 +124,7 @@ var _ = Describe("Registry", func() {
 		It("should merge default categories with user-specified ones", func() {
 			config := registry.ResourceConfig{
 				Singular:   "item",
-				Plural:     "items", 
+				Plural:     "items",
 				Kind:       "Item",
 				Categories: []string{"inventory", "custom"},
 			}
@@ -191,7 +191,7 @@ var _ = Describe("Registry", func() {
 			config1 := registry.ResourceConfig{
 				Singular:   "item",
 				Plural:     "items",
-				Kind:       "Item", 
+				Kind:       "Item",
 				ShortNames: []string{"itm"},
 			}
 			err := reg.RegisterResource(itemGVR, config1)
@@ -213,14 +213,14 @@ var _ = Describe("Registry", func() {
 	Describe("GetResourceConfig", func() {
 		BeforeEach(func() {
 			config := registry.ResourceConfig{
-				Singular:     "item", 
-				Plural:       "items",
-				Kind:         "Item",
-				ListKind:     "ItemList",
-				Namespaced:   true,
-				Description:  "Test item resource",
-				ShortNames:   []string{"itm"},
-				Categories:   []string{"inventory"},
+				Singular:    "item",
+				Plural:      "items",
+				Kind:        "Item",
+				ListKind:    "ItemList",
+				Namespaced:  true,
+				Description: "Test item resource",
+				ShortNames:  []string{"itm"},
+				Categories:  []string{"inventory"},
 			}
 			err := reg.RegisterResource(itemGVR, config)
 			Expect(err).ToNot(HaveOccurred())
@@ -241,7 +241,7 @@ var _ = Describe("Registry", func() {
 				Version:  "v1",
 				Resource: "unknown",
 			}
-			
+
 			_, err := reg.GetResourceConfig(unregisteredGVR)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("not registered"))
@@ -258,18 +258,18 @@ var _ = Describe("Registry", func() {
 			// Register multiple resources
 			itemConfig := registry.ResourceConfig{
 				Singular: "item",
-				Plural:   "items", 
+				Plural:   "items",
 				Kind:     "Item",
 			}
 			categoryConfig := registry.ResourceConfig{
 				Singular: "category",
 				Plural:   "categories",
-				Kind:     "Category", 
+				Kind:     "Category",
 			}
 
 			err := reg.RegisterResource(itemGVR, itemConfig)
 			Expect(err).ToNot(HaveOccurred())
-			
+
 			err = reg.RegisterResource(categoryGVR, categoryConfig)
 			Expect(err).ToNot(HaveOccurred())
 
@@ -320,7 +320,7 @@ var _ = Describe("Registry", func() {
 			config := registry.ResourceConfig{
 				Singular:   "item",
 				Plural:     "items",
-				Kind:       "Item", 
+				Kind:       "Item",
 				ShortNames: []string{"Item"},
 			}
 			err := caseSensitiveReg.RegisterResource(itemGVR, config)
@@ -347,14 +347,14 @@ var _ = Describe("Registry", func() {
 			}
 			categoryConfig := registry.ResourceConfig{
 				Singular:   "category",
-				Plural:     "categories", 
+				Plural:     "categories",
 				Kind:       "Category",
 				Categories: []string{"inventory"},
 			}
 
 			err := reg.RegisterResource(itemGVR, itemConfig)
 			Expect(err).ToNot(HaveOccurred())
-			
+
 			err = reg.RegisterResource(categoryGVR, categoryConfig)
 			Expect(err).ToNot(HaveOccurred())
 		})
@@ -407,7 +407,7 @@ var _ = Describe("Registry", func() {
 				Version:  "v1",
 				Resource: "unknown",
 			}
-			
+
 			_, err := reg.GetGVKForGVR(unregisteredGVR)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("mapping not found"))
@@ -419,7 +419,7 @@ var _ = Describe("Registry", func() {
 				Version: "v1",
 				Kind:    "Unknown",
 			}
-			
+
 			_, err := reg.GetGVRForGVK(unregisteredGVK)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("mapping not found"))
@@ -447,7 +447,7 @@ var _ = Describe("Registry", func() {
 			config := registry.ResourceConfig{
 				Singular:   "item",
 				Plural:     "items",
-				Kind:       "Item", 
+				Kind:       "Item",
 				ShortNames: []string{"itm"},
 				Categories: []string{"inventory"},
 			}
@@ -482,7 +482,7 @@ var _ = Describe("Registry", func() {
 				Version:  "v1",
 				Resource: "unknown",
 			}
-			
+
 			err := reg.UnregisterResource(unregisteredGVR)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("not registered"))
@@ -492,7 +492,7 @@ var _ = Describe("Registry", func() {
 	Describe("Thread Safety", func() {
 		It("should handle concurrent registration safely", func() {
 			done := make(chan bool)
-			
+
 			// Start multiple goroutines registering resources
 			for i := 0; i < 10; i++ {
 				go func(index int) {
@@ -507,7 +507,7 @@ var _ = Describe("Registry", func() {
 						Plural:   fmt.Sprintf("resource%ds", index),
 						Kind:     fmt.Sprintf("Resource%d", index),
 					}
-					
+
 					err := reg.RegisterResource(gvr, config)
 					Expect(err).ToNot(HaveOccurred())
 					done <- true
