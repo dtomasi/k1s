@@ -13,6 +13,7 @@ import (
 
 	"github.com/cockroachdb/pebble"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/apiserver/pkg/storage"
@@ -48,6 +49,9 @@ type pebbleStorage struct {
 
 	// versionMu protects resourceVersions map
 	versionMu sync.RWMutex
+
+	// initMu protects database initialization
+	initMu sync.Mutex
 
 	// versioner handles resource version management
 	versioner k1sstorage.SimpleVersioner
@@ -98,16 +102,20 @@ func NewPebbleStorageWithPath(path string, config k1sstorage.Config) k1sstorage.
 
 // initDB initializes the PebbleDB instance if not already initialized
 func (s *pebbleStorage) initDB() error {
+	s.initMu.Lock()
+	defer s.initMu.Unlock()
+
+	// Double-check after acquiring lock
 	if s.db != nil {
 		return nil
 	}
 
 	// Create directory if it doesn't exist - use custom path if provided in KeyPrefix
-	dbPath := filepath.Join(".", "data", "pebble")
-	if s.config.KeyPrefix != "" && filepath.IsAbs(s.config.KeyPrefix) {
+	var dbPath string
+	if s.config.KeyPrefix != "" {
 		dbPath = s.config.KeyPrefix
-	} else if s.config.KeyPrefix != "" {
-		dbPath = s.config.KeyPrefix
+	} else {
+		dbPath = filepath.Join(".", "data", "pebble")
 	}
 
 	// Configure PebbleDB options for high performance
@@ -494,14 +502,11 @@ func (s *pebbleStorage) List(ctx context.Context, key string, opts storage.ListO
 			continue
 		}
 
-		// For now, create a placeholder object for listing
-		// Real implementation should properly unmarshal based on object type
+		// Create placeholder object with actual data from storage
 		obj := &runtime.Unknown{
-			Raw: iter.Value(),
+			Raw:         iter.Value(),
+			ContentType: runtime.ContentTypeJSON,
 		}
-		obj.APIVersion = "unknown/v1"
-		obj.Kind = "Unknown"
-
 		matchedObjects = append(matchedObjects, obj)
 
 		// Track max resource version
@@ -525,9 +530,24 @@ func (s *pebbleStorage) List(ctx context.Context, key string, opts storage.ListO
 	}
 
 	// Set the items in the list
-	if err := meta.SetList(listObj, matchedObjects); err != nil {
-		atomic.AddUint64(&s.metrics.errors, 1)
-		return fmt.Errorf("failed to set list items: %w", err)
+	// Handle different list types differently
+	switch typedList := listObj.(type) {
+	case *metav1.List:
+		// For generic lists, directly set items as RawExtension
+		typedList.Items = make([]runtime.RawExtension, len(matchedObjects))
+		for i, obj := range matchedObjects {
+			if unknown, ok := obj.(*runtime.Unknown); ok {
+				typedList.Items[i] = runtime.RawExtension{
+					Raw: unknown.Raw,
+				}
+			}
+		}
+	default:
+		// Use meta.SetList for typed lists
+		if err := meta.SetList(listObj, matchedObjects); err != nil {
+			atomic.AddUint64(&s.metrics.errors, 1)
+			return fmt.Errorf("failed to set list items: %w", err)
+		}
 	}
 
 	atomic.AddUint64(&s.metrics.operations, 1)
