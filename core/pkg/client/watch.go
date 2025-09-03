@@ -4,15 +4,13 @@ import (
 	"context"
 	"fmt"
 
-	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/apiserver/pkg/storage"
 )
 
 // watchClient implements the WithWatch interface.
 type watchClient struct {
-	client *client
+	*client
 }
 
 // NewWatchClient creates a new client that supports watch operations.
@@ -25,43 +23,6 @@ func NewWatchClient(c Client) (WithWatch, error) {
 	return &watchClient{client: clientImpl}, nil
 }
 
-// Implement Client interface methods by delegating to embedded client
-func (w *watchClient) Get(ctx context.Context, key ObjectKey, obj Object, opts ...GetOption) error {
-	return w.client.Get(ctx, key, obj, opts...)
-}
-
-func (w *watchClient) List(ctx context.Context, list ObjectList, opts ...ListOption) error {
-	return w.client.List(ctx, list, opts...)
-}
-
-func (w *watchClient) Create(ctx context.Context, obj Object, opts ...CreateOption) error {
-	return w.client.Create(ctx, obj, opts...)
-}
-
-func (w *watchClient) Delete(ctx context.Context, obj Object, opts ...DeleteOption) error {
-	return w.client.Delete(ctx, obj, opts...)
-}
-
-func (w *watchClient) Update(ctx context.Context, obj Object, opts ...UpdateOption) error {
-	return w.client.Update(ctx, obj, opts...)
-}
-
-func (w *watchClient) Patch(ctx context.Context, obj Object, patch Patch, opts ...PatchOption) error {
-	return w.client.Patch(ctx, obj, patch, opts...)
-}
-
-func (w *watchClient) Status() StatusWriter {
-	return w.client.Status()
-}
-
-func (w *watchClient) Scheme() *runtime.Scheme {
-	return w.client.Scheme()
-}
-
-func (w *watchClient) RESTMapper() meta.RESTMapper {
-	return w.client.RESTMapper()
-}
-
 // Watch watches objects of the given type.
 func (w *watchClient) Watch(ctx context.Context, obj ObjectList, opts ...WatchOption) (watch.Interface, error) {
 	options := &WatchOptions{}
@@ -69,17 +30,17 @@ func (w *watchClient) Watch(ctx context.Context, obj ObjectList, opts ...WatchOp
 		opt.ApplyToWatch(options)
 	}
 
-	gvk, err := w.client.getGVKForObjectList(obj)
+	gvk, err := w.getGVKForObjectList(obj)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get GVK for object list: %w", err)
 	}
 
-	gvr, err := w.client.registry.GetGVRForGVK(gvk)
+	gvr, err := w.registry.GetGVRForGVK(gvk)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get GVR for GVK %s: %w", gvk, err)
 	}
 
-	storageKey := w.client.buildListStorageKey(gvr, options.Namespace)
+	storageKey := w.buildListStorageKey(gvr, options.Namespace)
 
 	// Build storage list options for watching
 	listOpts := storage.ListOptions{
@@ -96,16 +57,19 @@ func (w *watchClient) Watch(ctx context.Context, obj ObjectList, opts ...WatchOp
 	}
 
 	// Apply label and field selectors if specified
-	// Note: For now, server-side filtering is not implemented at the storage level
-	// We rely on client-side filtering in the filteringWatcher below
-	hasLabelFilters := len(options.LabelSelector.MatchLabels) > 0 || len(options.LabelSelector.MatchExpressions) > 0
-	hasFieldFilters := options.FieldSelector != ""
+	if len(options.LabelSelector.MatchLabels) > 0 || len(options.LabelSelector.MatchExpressions) > 0 {
+		// TODO: Implement label selector filtering
+		// For now, we'll watch all objects and let the client filter
+		_ = options.LabelSelector // Acknowledge we're aware of this parameter
+	}
 
-	// Storage-level filtering would be implemented here in the future
-	_ = hasLabelFilters
-	_ = hasFieldFilters
+	if options.FieldSelector != "" {
+		// TODO: Implement field selector filtering
+		// For now, we'll watch all objects and let the client filter
+		_ = options.FieldSelector // Acknowledge we're aware of this parameter
+	}
 
-	watcher, err := w.client.storage.Watch(ctx, storageKey, listOpts)
+	watcher, err := w.storage.Watch(ctx, storageKey, listOpts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start watch: %w", err)
 	}
@@ -232,18 +196,9 @@ func (fw *filteringWatcher) shouldIncludeEvent(event watch.Event) bool {
 	if fw.options.FieldSelector != "" {
 		// For now, we only support basic field selectors like "metadata.name=value"
 		// A full implementation would parse and evaluate complex field selectors
-		// This is a placeholder for future field selector implementation
-		return fw.evaluateFieldSelector(obj)
+		// TODO: Implement proper field selector parsing and evaluation
+		_ = fw.options.FieldSelector // Acknowledge we're aware of this parameter
 	}
 
-	return true
-}
-
-// evaluateFieldSelector evaluates basic field selectors.
-// This is a simplified implementation for basic field selector patterns.
-func (fw *filteringWatcher) evaluateFieldSelector(obj Object) bool {
-	// For now, just return true - in a full implementation this would
-	// parse and evaluate field selectors like "metadata.name=value"
-	// TODO: Implement proper field selector parsing and evaluation
 	return true
 }
