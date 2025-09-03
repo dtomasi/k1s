@@ -629,7 +629,7 @@ This architecture provides:
 2. **CLI-Optimized Performance:** Fast startup, on-demand loading, process-safe access
 3. **Simple Multi-Tenancy:** Built-in isolation at the storage layer with simple prefix strategies
 4. **Complete Event System:** Kubernetes event recording with CLI-optimized persistence
-5. **Flexible Controller Runtime:** Both embedded and plugin-based controller support
+5. **Flexible Controller Runtime:** Both embedded and WASM plugin controller support
 6. **Easy CLI Integration:** CLI-runtime package for command-line tool development
 7. **Embedded Storage:** Multiple storage backends optimized for different use cases
 8. **Modular Design:** Clean separation allowing applications to use only needed components

@@ -286,7 +286,7 @@ These Kubernetes features are not implemented in k1s due to CLI context limitati
 #### 4. **Networking and Services**
 - **Why not:** No cluster networking in CLI tools
 - **Alternative:** Process-level communication
-- **Equivalent:** Plugin system via gRPC for inter-process communication
+- **Equivalent:** WASM plugin system for memory-isolated extensions
 
 #### 5. **Persistent Volumes**
 - **Why not:** Direct embedded storage model

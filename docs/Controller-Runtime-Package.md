@@ -2,11 +2,18 @@
 
 **Related Documentation:**
 - [CLI-Runtime Package](CLI-Runtime-Package.md) - CLI instrumentation package  
+- [Controller Plugin Architecture](Controller-Plugin-Architecture.md) - Detailed plugin system architecture
+- [Controller SDK Guide](Controller-SDK-Guide.md) - SDK documentation for plugin development
 - [Architecture](Architecture.md) - Overall k1s system architecture
 
 ## Overview
 
-The Controller-Runtime package (`core/pkg/controller/`) provides a controller-runtime compatible interface optimized for CLI environments. It supports both embedded controllers (same process) and pluggable controllers (external processes via go-plugin or WASM).
+The Controller-Runtime package (`core/pkg/controller/`) provides a controller-runtime compatible interface optimized for CLI environments. It supports both embedded controllers (same process) and WASM plugins (WebAssembly modules in the same process with memory isolation).
+
+> **📖 For Detailed Information:**
+> - **Plugin Architecture**: See [Controller Plugin Architecture](Controller-Plugin-Architecture.md) for comprehensive plugin system design
+> - **SDK Development**: See [Controller SDK Guide](Controller-SDK-Guide.md) for multi-language plugin development guides
+> - **Implementation Examples**: Both documents contain extensive code examples and best practices
 
 ## Architecture Overview
 
@@ -31,10 +38,10 @@ graph TB
             CTRL3[Custom Controller<br/>User Defined]
         end
         
-        subgraph "Plugin System"
-            GRPC[gRPC Plugin<br/>External Binary]
-            PLUGIN1[External Controller 1<br/>Language Agnostic]
-            PLUGIN2[External Controller 2<br/>Custom Logic]
+        subgraph "WASM Plugin System"
+            WASM[WASM Runtime<br/>Memory Isolated]
+            PLUGIN1[WASM Plugin 1<br/>Rust/TinyGo/JS]
+            PLUGIN2[WASM Plugin 2<br/>Custom Logic]
         end
         
         subgraph "K1S Core Runtime"
@@ -62,10 +69,10 @@ graph TB
     EMBEDDED --> CTRL2
     EMBEDDED --> CTRL3
     
-    %% Plugin Connections  
-    PLUGINS --> GRPC
-    GRPC --> PLUGIN1
-    GRPC --> PLUGIN2
+    %% WASM Plugin Connections  
+    PLUGINS --> WASM
+    WASM --> PLUGIN1
+    WASM --> PLUGIN2
     
     %% K1S Core Integration
     MGR --> CLIENT
@@ -74,7 +81,7 @@ graph TB
     CTRL1 --> CLIENT
     CTRL2 --> CLIENT
     CTRL3 --> CLIENT
-    GRPC --> CLIENT
+    WASM --> CLIENT
     CLIENT --> STORAGE
     
     %% Styling
@@ -95,7 +102,7 @@ graph TB
 
 1. **Maximum Compatibility:** Implement standard controller-runtime interfaces where applicable
 2. **CLI-Optimized:** Triggered execution instead of continuous loops
-3. **Dual Mode Support:** Embedded and pluggable controller architectures
+3. **Dual Mode Support:** Embedded and WASM plugin controller architectures
 4. **Event-Driven:** Leverage k1s event system for watch-based reconciliation
 
 ## Controller Execution Workflows
@@ -141,47 +148,38 @@ sequenceDiagram
     Trigger-->>CLI: Command finished
 ```
 
-### Plugin Controller Sequence
+### WASM Plugin Controller Sequence
 
 ```mermaid
 sequenceDiagram
     participant CLI as CLI Application
     participant Manager as Controller Manager
-    participant PluginMgr as Plugin Manager
-    participant Plugin as External Plugin
-    participant gRPC as gRPC Client
+    participant WASM as WASM Runtime
+    participant Plugin as WASM Module
     participant Client as K1S Client
 
-    CLI->>Manager: Start with plugin controllers
-    Manager->>PluginMgr: LoadPlugin(path, config)
-    PluginMgr->>Plugin: exec.Command(path)
-    Plugin-->>PluginMgr: Plugin process started
-    PluginMgr->>gRPC: NewClient(handshake)
-    gRPC->>Plugin: gRPC connection established
-    Plugin-->>gRPC: Controller metadata
-    gRPC-->>PluginMgr: PluginController interface
-    PluginMgr-->>Manager: Plugin ready
+    CLI->>Manager: Start with WASM controllers
+    Manager->>WASM: LoadModule(wasm_file, config)
+    WASM->>Plugin: Instantiate WASM module
+    Plugin-->>WASM: Module ready
+    WASM->>Plugin: Call GetMetadata export
+    Plugin-->>WASM: Plugin metadata
+    WASM-->>Manager: Plugin ready
     
-    Manager->>PluginMgr: ExecutePlugin(requests)
-    PluginMgr->>gRPC: Reconcile(ctx, request)
-    gRPC->>Plugin: ReconcileRequest{name, namespace, object}
+    Manager->>WASM: ExecutePlugin(requests)
+    WASM->>Plugin: Call reconcile export
     
     Plugin->>Plugin: Business logic execution
     
     alt Plugin needs K1S client access
-        Plugin->>gRPC: ClientOperation(get/update/create)
-        gRPC->>Client: Proxy operation
-        Client-->>gRPC: Operation result
-        gRPC-->>Plugin: Result
+        Plugin->>WASM: Host function call (k1s_get)
+        WASM->>Client: Proxy operation
+        Client-->>WASM: Operation result
+        WASM-->>Plugin: Result in WASM memory
     end
     
-    Plugin-->>gRPC: ReconcileResponse{requeue, error}
-    gRPC-->>PluginMgr: Result
-    PluginMgr-->>Manager: Plugin execution complete
-    
-    Manager->>PluginMgr: Shutdown()
-    PluginMgr->>Plugin: Terminate process
-    Plugin-->>PluginMgr: Process exit
+    Plugin-->>WASM: Return reconcile result
+    WASM-->>Manager: Plugin execution complete
 ```
 
 ### CLI Integration Workflow
@@ -228,15 +226,12 @@ core/pkg/controller/
 ├── embedded/               # Embedded controller support
 │   ├── registry.go         # Embedded controller registry
 │   └── lifecycle.go        # Lifecycle management
-├── plugins/                # Pluggable controller support
+├── plugins/                # WASM plugin support
 │   ├── manager.go          # Plugin manager
-│   ├── grpc/              # gRPC plugin implementation
-│   │   ├── plugin.go       # go-plugin integration
-│   │   ├── proto/          # Protocol definitions
-│   │   └── client.go       # GRPC client
-│   └── wasm/              # WASM plugin implementation (future)
+│   └── wasm/              # WASM plugin implementation
 │       ├── runtime.go      # WASM runtime integration
-│       └── host.go         # Host functions
+│       ├── host.go         # Host functions
+│       └── module.go       # Module loading/instantiation
 └── client/                 # Controller-runtime client compatibility
     ├── client.go           # client.Client implementation
     └── interfaces.go       # Standard interfaces
@@ -290,8 +285,8 @@ type Manager interface {
     // Controller builder
     NewControllerManagedBy(mgr Manager) *Builder
     
-    // Plugin support
-    RegisterPluginController(name string, plugin PluginController) error
+    // WASM plugin support
+    RegisterWASMPlugin(name string, plugin WASMPlugin) error
     ListControllers() []ControllerInfo
 }
 
@@ -310,7 +305,7 @@ type ControllerStatus string
 
 const (
     ControllerTypeEmbedded ControllerType = "embedded"
-    ControllerTypePlugin   ControllerType = "plugin"
+    ControllerTypeWASM     ControllerType = "wasm"
     
     ControllerStatusIdle    ControllerStatus = "idle"
     ControllerStatusRunning ControllerStatus = "running"
@@ -334,9 +329,9 @@ type Options struct {
     // Controller execution mode
     Mode ExecutionMode
     
-    // Plugin configuration
-    PluginDir    string        // Directory for plugin binaries
-    PluginConfig PluginConfig  // Plugin-specific configuration
+    // WASM plugin configuration
+    WASMDir      string        // Directory for .wasm files
+    WASMConfig   WASMConfig    // WASM-specific configuration
     
     // Reconciliation settings
     DefaultReconcilePeriod time.Duration  // For periodic reconciliation
@@ -1051,3 +1046,40 @@ func NewControllerCommand(mgr controller.Manager) *cobra.Command {
 - ✅ Memory footprint optimized for short-lived processes
 
 This architecture provides the best of both worlds: familiar controller-runtime patterns with CLI-optimized execution and flexible deployment options.
+
+---
+
+## 🔄 Architecture Update (2025)
+
+**Important:** This document provides a high-level overview of the controller-runtime architecture. Due to recent architectural decisions, detailed implementation information has been moved to specialized documents:
+
+### 📋 Key Changes
+- **Removed gRPC/go-plugin complexity** due to performance and resource concerns
+- **Focused on Embedded + WASM architecture** for optimal performance and developer experience
+- **Simplified deployment model** with better security and hot-reload capabilities
+
+### 📖 For Detailed Implementation Information:
+
+#### **Plugin Architecture & Performance Analysis**
+👉 **[Controller Plugin Architecture](Controller-Plugin-Architecture.md)**
+- Complete WASM vs Embedded comparison
+- Performance benchmarks and resource analysis  
+- Security and isolation models
+- When to use which approach
+
+#### **SDK Development & Language Support**
+👉 **[Controller SDK Guide](Controller-SDK-Guide.md)**  
+- TinyGo, Rust, and AssemblyScript SDKs
+- WASM plugin development workflows
+- Testing frameworks and best practices
+- CLI tools and templates
+
+#### **Legacy Implementation References**
+The detailed gRPC/go-plugin implementation examples in this document are **deprecated** and maintained only for historical reference. New implementations should follow the patterns in the specialized documents above.
+
+### 🎯 Recommended Reading Order
+1. **Start here** for controller-runtime API compatibility
+2. **[Plugin Architecture](Controller-Plugin-Architecture.md)** for deployment decisions  
+3. **[SDK Guide](Controller-SDK-Guide.md)** for development workflows
+
+This simplified architecture delivers **better performance**, **lower resource usage**, and **easier deployment** while maintaining full compatibility with controller-runtime patterns.
