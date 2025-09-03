@@ -237,7 +237,7 @@ type TestItem struct {
 func (t *TestItem) DeepCopyObject() runtime.Object {
 	return &TestItem{
 		TypeMeta:   t.TypeMeta,
-		ObjectMeta: *t.ObjectMeta.DeepCopy(),
+		ObjectMeta: *t.ObjectMeta.DeepCopy(), //nolint:staticcheck // embedded field access is intentional
 		Spec:       t.Spec,
 		Status:     t.Status,
 	}
@@ -264,7 +264,7 @@ func (t *TestItemList) DeepCopyObject() runtime.Object {
 	copy(items, t.Items)
 	return &TestItemList{
 		TypeMeta: t.TypeMeta,
-		ListMeta: *t.ListMeta.DeepCopy(),
+		ListMeta: *t.ListMeta.DeepCopy(), //nolint:staticcheck // embedded field access is intentional
 		Items:    items,
 	}
 }
