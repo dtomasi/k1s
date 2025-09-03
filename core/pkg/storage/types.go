@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -140,6 +141,7 @@ type SimpleWatch struct {
 	result chan *WatchEvent
 	done   chan struct{}
 	closed bool
+	mu     sync.Mutex
 }
 
 // NewSimpleWatch creates a new SimpleWatch instance
@@ -152,6 +154,8 @@ func NewSimpleWatch() *SimpleWatch {
 
 // Stop implements watch.Interface
 func (w *SimpleWatch) Stop() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if !w.closed {
 		w.closed = true
 		close(w.done)
