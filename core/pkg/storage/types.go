@@ -11,7 +11,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/apiserver/pkg/storage/value"
 )
 
 // Config holds storage configuration options including multi-tenancy support
@@ -26,7 +25,8 @@ type Config struct {
 	KeyPrefix string
 
 	// Transformer handles encryption/decryption of stored objects
-	Transformer value.Transformer
+	// Currently unused - placeholder for future encryption support
+	Transformer interface{}
 }
 
 // TenantConfig provides tenant-specific configuration

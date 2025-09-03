@@ -93,6 +93,7 @@ linters:
     # Code quality
     - dupl
     - nolintlint
+    - staticcheck
 
 issues:
   exclude-rules:

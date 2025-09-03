@@ -20,6 +20,18 @@ import (
 	k1sstorage "github.com/dtomasi/k1s/core/pkg/storage"
 )
 
+// Test constants to avoid goconst violations
+const (
+	testAPIVersion      = "test/v1"
+	testObjectKind      = "TestObject"
+	testObjectListKind  = "TestObjectList"
+	testNamespace       = "default"
+	testObjectName      = "test-object"
+	testObjects         = "test-objects"
+	testObjectsTestName = "test-objects/test-object"
+	testObjectsNonExist = "test-objects/non-existent"
+)
+
 func TestPebbleStorage(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Pebble Storage Suite")
@@ -48,12 +60,13 @@ func (t *TestObject) DeepCopyObject() runtime.Object {
 	if t == nil {
 		return nil
 	}
-	return &TestObject{
+	out := &TestObject{
 		TypeMeta:   t.TypeMeta,
-		ObjectMeta: *t.ObjectMeta.DeepCopy(),
+		ObjectMeta: *t.DeepCopy(),
 		Spec:       t.Spec,
 		Status:     t.Status,
 	}
+	return out
 }
 
 // TestObjectList represents a list of test objects
@@ -71,7 +84,7 @@ func (t *TestObjectList) DeepCopyObject() runtime.Object {
 	}
 	out := &TestObjectList{
 		TypeMeta: t.TypeMeta,
-		ListMeta: *t.ListMeta.DeepCopy(),
+		ListMeta: *t.DeepCopy(),
 	}
 	if t.Items != nil {
 		out.Items = make([]TestObject, len(t.Items))
@@ -107,12 +120,12 @@ var _ = Describe("PebbleStorage", func() {
 
 		testObject = &TestObject{
 			TypeMeta: metav1.TypeMeta{
-				APIVersion: "test/v1",
-				Kind:       "TestObject",
+				APIVersion: testAPIVersion,
+				Kind:       testObjectKind,
 			},
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-object",
-				Namespace: "default",
+				Name:      testObjectName,
+				Namespace: testNamespace,
 			},
 			Spec: TestSpec{
 				Name:        "Test Object",
@@ -125,8 +138,8 @@ var _ = Describe("PebbleStorage", func() {
 
 		testList = &TestObjectList{
 			TypeMeta: metav1.TypeMeta{
-				APIVersion: "test/v1",
-				Kind:       "TestObjectList",
+				APIVersion: testAPIVersion,
+				Kind:       testObjectListKind,
 			},
 		}
 	})
@@ -136,14 +149,16 @@ var _ = Describe("PebbleStorage", func() {
 			Expect(storage.Close()).To(Succeed())
 		}
 		if tempDir != "" {
-			os.RemoveAll(tempDir)
+			if err := os.RemoveAll(tempDir); err != nil {
+				GinkgoT().Logf("Warning: failed to remove temp dir: %v", err)
+			}
 		}
 		cancel()
 	})
 
 	Describe("Basic Operations", func() {
 		It("should create an object successfully", func() {
-			key := "test-objects/test-object"
+			key := testObjectsTestName
 			out := &TestObject{}
 
 			err := storage.Create(ctx, key, testObject, out, 0)
@@ -152,7 +167,7 @@ var _ = Describe("PebbleStorage", func() {
 		})
 
 		It("should fail to create duplicate objects", func() {
-			key := "test-objects/test-object"
+			key := testObjectsTestName
 
 			err := storage.Create(ctx, key, testObject, nil, 0)
 			Expect(err).NotTo(HaveOccurred())
@@ -164,7 +179,7 @@ var _ = Describe("PebbleStorage", func() {
 		})
 
 		It("should get an object successfully", func() {
-			key := "test-objects/test-object"
+			key := testObjectsTestName
 
 			// Create object first
 			err := storage.Create(ctx, key, testObject, nil, 0)
@@ -179,7 +194,7 @@ var _ = Describe("PebbleStorage", func() {
 		})
 
 		It("should fail to get non-existent objects", func() {
-			key := "test-objects/non-existent"
+			key := testObjectsNonExist
 			retrieved := &TestObject{}
 
 			err := storage.Get(ctx, key, k8storage.GetOptions{}, retrieved)
@@ -188,7 +203,7 @@ var _ = Describe("PebbleStorage", func() {
 		})
 
 		It("should ignore not found when requested", func() {
-			key := "test-objects/non-existent"
+			key := testObjectsNonExist
 			retrieved := &TestObject{}
 
 			err := storage.Get(ctx, key, k8storage.GetOptions{IgnoreNotFound: true}, retrieved)
@@ -196,7 +211,7 @@ var _ = Describe("PebbleStorage", func() {
 		})
 
 		It("should delete an object successfully", func() {
-			key := "test-objects/test-object"
+			key := testObjectsTestName
 
 			// Create object first
 			err := storage.Create(ctx, key, testObject, nil, 0)
@@ -215,7 +230,7 @@ var _ = Describe("PebbleStorage", func() {
 		})
 
 		It("should fail to delete non-existent objects", func() {
-			key := "test-objects/non-existent"
+			key := testObjectsNonExist
 			out := &TestObject{}
 
 			err := storage.Delete(ctx, key, out, nil, nil, nil)
@@ -266,7 +281,7 @@ var _ = Describe("PebbleStorage", func() {
 
 	Describe("Watch Operations", func() {
 		It("should create a watch successfully", func() {
-			key := "test-objects"
+			key := testObjects
 			opts := k8storage.ListOptions{Recursive: true}
 
 			watcher, err := storage.Watch(ctx, key, opts)
@@ -278,7 +293,7 @@ var _ = Describe("PebbleStorage", func() {
 		})
 
 		It("should receive watch events for creates", func() {
-			key := "test-objects"
+			key := testObjects
 			opts := k8storage.ListOptions{Recursive: true}
 
 			watcher, err := storage.Watch(ctx, key, opts)
@@ -305,7 +320,7 @@ var _ = Describe("PebbleStorage", func() {
 		})
 
 		It("should receive watch events for deletes", func() {
-			key := "test-objects"
+			key := testObjects
 			objKey := "test-objects/watch-delete-test"
 
 			// Create object first
@@ -344,7 +359,7 @@ var _ = Describe("PebbleStorage", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Start watching with initial events
-			key := "test-objects"
+			key := testObjects
 			sendInitial := true
 			opts := k8storage.ListOptions{
 				Recursive:         true,
@@ -421,8 +436,7 @@ var _ = Describe("PebbleStorage", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Delete with correct UID - should succeed
-			correctUID := types.UID(testObject.UID)
-			preconditions := &k8storage.Preconditions{UID: &correctUID}
+			preconditions := &k8storage.Preconditions{UID: &testObject.UID}
 			err = storage.Delete(ctx, key, nil, preconditions, nil, testObject)
 			Expect(err).NotTo(HaveOccurred())
 		})
@@ -593,13 +607,21 @@ var _ = Describe("PebbleStorage", func() {
 
 		AfterEach(func() {
 			if tenant1Storage != nil {
-				tenant1Storage.Close()
+				if err := tenant1Storage.Close(); err != nil {
+					GinkgoT().Logf("Warning: failed to close tenant1 storage: %v", err)
+				}
 			}
 			if tenant2Storage != nil {
-				tenant2Storage.Close()
+				if err := tenant2Storage.Close(); err != nil {
+					GinkgoT().Logf("Warning: failed to close tenant2 storage: %v", err)
+				}
 			}
-			os.RemoveAll(tenant1Dir)
-			os.RemoveAll(tenant2Dir)
+			if err := os.RemoveAll(tenant1Dir); err != nil {
+				GinkgoT().Logf("Warning: failed to remove tenant1 temp dir: %v", err)
+			}
+			if err := os.RemoveAll(tenant2Dir); err != nil {
+				GinkgoT().Logf("Warning: failed to remove tenant2 temp dir: %v", err)
+			}
 		})
 
 		It("should isolate data between tenants", func() {
@@ -712,7 +734,7 @@ var _ = Describe("PebbleStorage", func() {
 		})
 
 		It("should stop watches on close", func() {
-			key := "test-objects"
+			key := testObjects
 			opts := k8storage.ListOptions{Recursive: true}
 
 			watcher, err := storage.Watch(ctx, key, opts)

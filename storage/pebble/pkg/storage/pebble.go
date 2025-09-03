@@ -3,7 +3,9 @@ package storage
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -16,6 +18,14 @@ import (
 	"k8s.io/apiserver/pkg/storage"
 
 	k1sstorage "github.com/dtomasi/k1s/core/pkg/storage"
+)
+
+// Error constants for goconst linter
+const (
+	errStorageIsClosed = "storage is closed"
+	errKeyNotFound     = "key not found"
+	errVersionSuffix   = "#version"
+	errFailedToClose   = "failed to close"
 )
 
 // pebbleStorage implements a high-performance LSM-tree storage backend
@@ -142,7 +152,7 @@ func (s *pebbleStorage) Create(ctx context.Context, key string, obj, out runtime
 
 	if s.closed.Load() {
 		atomic.AddUint64(&s.metrics.errors, 1)
-		return fmt.Errorf("storage is closed")
+		return errors.New(errStorageIsClosed)
 	}
 
 	if err := s.initDB(); err != nil {
@@ -156,7 +166,9 @@ func (s *pebbleStorage) Create(ctx context.Context, key string, obj, out runtime
 	// Check if key already exists
 	_, closer, err := s.db.Get([]byte(key))
 	if err == nil {
-		closer.Close()
+		if err := closer.Close(); err != nil {
+			log.Printf("Warning: %s closer: %v", errFailedToClose, err)
+		}
 		atomic.AddUint64(&s.metrics.errors, 1)
 		return fmt.Errorf("key already exists: %s", key)
 	} else if err != pebble.ErrNotFound {
@@ -187,27 +199,35 @@ func (s *pebbleStorage) Create(ctx context.Context, key string, obj, out runtime
 	// Store in PebbleDB with atomic transaction
 	batch := s.db.NewBatch()
 	if err := batch.Set([]byte(key), data, pebble.Sync); err != nil {
-		batch.Close()
+		if err := batch.Close(); err != nil {
+			log.Printf("Warning: %s batch: %v", errFailedToClose, err)
+		}
 		atomic.AddUint64(&s.metrics.errors, 1)
 		return fmt.Errorf("failed to set key in batch: %w", err)
 	}
 
 	// Store resource version mapping
-	versionKey := key + "#version"
+	versionKey := key + errVersionSuffix
 	versionData := fmt.Sprintf("%d", resourceVersion)
 	if err := batch.Set([]byte(versionKey), []byte(versionData), pebble.NoSync); err != nil {
-		batch.Close()
+		if err := batch.Close(); err != nil {
+			log.Printf("Warning: %s batch: %v", errFailedToClose, err)
+		}
 		atomic.AddUint64(&s.metrics.errors, 1)
 		return fmt.Errorf("failed to set version key in batch: %w", err)
 	}
 
 	// Commit the transaction
 	if err := batch.Commit(pebble.Sync); err != nil {
-		batch.Close()
+		if err := batch.Close(); err != nil {
+			log.Printf("Warning: %s batch: %v", errFailedToClose, err)
+		}
 		atomic.AddUint64(&s.metrics.errors, 1)
 		return fmt.Errorf("failed to commit batch: %w", err)
 	}
-	batch.Close()
+	if err := batch.Close(); err != nil {
+		log.Printf("Warning: %s batch: %v", errFailedToClose, err)
+	}
 
 	// Update in-memory resource version tracking
 	s.versionMu.Lock()
@@ -240,7 +260,7 @@ func (s *pebbleStorage) Delete(ctx context.Context, key string, out runtime.Obje
 
 	if s.closed.Load() {
 		atomic.AddUint64(&s.metrics.errors, 1)
-		return fmt.Errorf("storage is closed")
+		return errors.New(errStorageIsClosed)
 	}
 
 	if err := s.initDB(); err != nil {
@@ -259,12 +279,16 @@ func (s *pebbleStorage) Delete(ctx context.Context, key string, out runtime.Obje
 		data, closer, err := s.db.Get([]byte(key))
 		if err == pebble.ErrNotFound {
 			atomic.AddUint64(&s.metrics.errors, 1)
-			return fmt.Errorf("key not found: %s", key)
+			return fmt.Errorf(errKeyNotFound+": %s", key)
 		} else if err != nil {
 			atomic.AddUint64(&s.metrics.errors, 1)
 			return fmt.Errorf("failed to get existing object: %w", err)
 		}
-		defer closer.Close()
+		defer func() {
+			if err := closer.Close(); err != nil {
+				log.Printf("Warning: %s closer: %v", errFailedToClose, err)
+			}
+		}()
 
 		existingObj = &runtime.Unknown{}
 		if err := json.Unmarshal(data, existingObj); err != nil {
@@ -300,26 +324,34 @@ func (s *pebbleStorage) Delete(ctx context.Context, key string, out runtime.Obje
 	// Delete from PebbleDB with atomic transaction
 	batch := s.db.NewBatch()
 	if err := batch.Delete([]byte(key), pebble.Sync); err != nil {
-		batch.Close()
+		if err := batch.Close(); err != nil {
+			log.Printf("Warning: %s batch: %v", errFailedToClose, err)
+		}
 		atomic.AddUint64(&s.metrics.errors, 1)
 		return fmt.Errorf("failed to delete key in batch: %w", err)
 	}
 
 	// Delete resource version mapping
-	versionKey := key + "#version"
+	versionKey := key + errVersionSuffix
 	if err := batch.Delete([]byte(versionKey), pebble.NoSync); err != nil {
-		batch.Close()
+		if err := batch.Close(); err != nil {
+			log.Printf("Warning: %s batch: %v", errFailedToClose, err)
+		}
 		atomic.AddUint64(&s.metrics.errors, 1)
 		return fmt.Errorf("failed to delete version key in batch: %w", err)
 	}
 
 	// Commit the transaction
 	if err := batch.Commit(pebble.Sync); err != nil {
-		batch.Close()
+		if err := batch.Close(); err != nil {
+			log.Printf("Warning: %s batch: %v", errFailedToClose, err)
+		}
 		atomic.AddUint64(&s.metrics.errors, 1)
 		return fmt.Errorf("failed to commit batch: %w", err)
 	}
-	batch.Close()
+	if err := batch.Close(); err != nil {
+		log.Printf("Warning: %s batch: %v", errFailedToClose, err)
+	}
 
 	// Update in-memory resource version tracking
 	s.versionMu.Lock()
@@ -341,7 +373,7 @@ func (s *pebbleStorage) Get(ctx context.Context, key string, opts storage.GetOpt
 
 	if s.closed.Load() {
 		atomic.AddUint64(&s.metrics.errors, 1)
-		return fmt.Errorf("storage is closed")
+		return errors.New(errStorageIsClosed)
 	}
 
 	if err := s.initDB(); err != nil {
@@ -359,12 +391,16 @@ func (s *pebbleStorage) Get(ctx context.Context, key string, opts storage.GetOpt
 		if opts.IgnoreNotFound {
 			return nil
 		}
-		return fmt.Errorf("key not found: %s", key)
+		return fmt.Errorf(errKeyNotFound+": %s", key)
 	} else if err != nil {
 		atomic.AddUint64(&s.metrics.errors, 1)
 		return fmt.Errorf("failed to get key: %w", err)
 	}
-	defer closer.Close()
+	defer func() {
+		if err := closer.Close(); err != nil {
+			log.Printf("Warning: %s closer: %v", errFailedToClose, err)
+		}
+	}()
 
 	// Check resource version if specified
 	if opts.ResourceVersion != "" {
@@ -402,7 +438,7 @@ func (s *pebbleStorage) List(ctx context.Context, key string, opts storage.ListO
 
 	if s.closed.Load() {
 		atomic.AddUint64(&s.metrics.errors, 1)
-		return fmt.Errorf("storage is closed")
+		return errors.New(errStorageIsClosed)
 	}
 
 	if err := s.initDB(); err != nil {
@@ -414,7 +450,7 @@ func (s *pebbleStorage) List(ctx context.Context, key string, opts storage.ListO
 	key = s.buildKey(key)
 
 	var matchedObjects []runtime.Object
-	maxResourceVersion := uint64(0)
+	var maxResourceVersion uint64
 
 	// Create iterator for efficient prefix scanning
 	prefixIterOptions := &pebble.IterOptions{}
@@ -432,14 +468,18 @@ func (s *pebbleStorage) List(ctx context.Context, key string, opts storage.ListO
 		atomic.AddUint64(&s.metrics.errors, 1)
 		return fmt.Errorf("failed to create iterator: %w", err)
 	}
-	defer iter.Close()
+	defer func() {
+		if err := iter.Close(); err != nil {
+			log.Printf("Warning: %s iterator: %v", errFailedToClose, err)
+		}
+	}()
 
 	// Iterate through matching keys
 	for iter.First(); iter.Valid(); iter.Next() {
 		storageKey := string(iter.Key())
 
 		// Skip version keys
-		if strings.HasSuffix(storageKey, "#version") {
+		if strings.HasSuffix(storageKey, errVersionSuffix) {
 			continue
 		}
 
@@ -501,7 +541,7 @@ func (s *pebbleStorage) Watch(ctx context.Context, key string, opts storage.List
 	}
 
 	if s.closed.Load() {
-		return nil, fmt.Errorf("storage is closed")
+		return nil, errors.New(errStorageIsClosed)
 	}
 
 	if err := s.initDB(); err != nil {
@@ -540,12 +580,16 @@ func (s *pebbleStorage) Watch(ctx context.Context, key string, opts storage.List
 
 		iter, err := s.db.NewIter(prefixIterOptions)
 		if err == nil {
-			defer iter.Close()
+			defer func() {
+				if err := iter.Close(); err != nil {
+					log.Printf("Warning: %s iterator: %v", errFailedToClose, err)
+				}
+			}()
 			for iter.First(); iter.Valid(); iter.Next() {
 				storageKey := string(iter.Key())
 
 				// Skip version keys
-				if strings.HasSuffix(storageKey, "#version") {
+				if strings.HasSuffix(storageKey, errVersionSuffix) {
 					continue
 				}
 
@@ -603,7 +647,7 @@ func (s *pebbleStorage) Close() error {
 // Compact performs storage compaction
 func (s *pebbleStorage) Compact(ctx context.Context) error {
 	if s.closed.Load() {
-		return fmt.Errorf("storage is closed")
+		return errors.New(errStorageIsClosed)
 	}
 
 	if err := s.initDB(); err != nil {
@@ -625,7 +669,7 @@ func (s *pebbleStorage) Count(ctx context.Context, key string) (int64, error) {
 	}
 
 	if s.closed.Load() {
-		return 0, fmt.Errorf("storage is closed")
+		return 0, errors.New(errStorageIsClosed)
 	}
 
 	if err := s.initDB(); err != nil {
@@ -635,7 +679,7 @@ func (s *pebbleStorage) Count(ctx context.Context, key string) (int64, error) {
 	// Apply tenant/namespace prefix
 	key = s.buildKey(key)
 
-	count := int64(0)
+	var count int64
 
 	// Create iterator for efficient prefix scanning
 	prefixIterOptions := &pebble.IterOptions{
@@ -647,14 +691,18 @@ func (s *pebbleStorage) Count(ctx context.Context, key string) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to create iterator: %w", err)
 	}
-	defer iter.Close()
+	defer func() {
+		if err := iter.Close(); err != nil {
+			log.Printf("Warning: %s iterator: %v", errFailedToClose, err)
+		}
+	}()
 
 	// Count matching keys
 	for iter.First(); iter.Valid(); iter.Next() {
 		storageKey := string(iter.Key())
 
 		// Skip version keys
-		if strings.HasSuffix(storageKey, "#version") {
+		if strings.HasSuffix(storageKey, errVersionSuffix) {
 			continue
 		}
 
