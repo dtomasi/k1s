@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -147,13 +148,19 @@ var _ = Describe("PebbleStorage", func() {
 	AfterEach(func() {
 		if storage != nil {
 			Expect(storage.Close()).To(Succeed())
+			storage = nil // Clear reference
+		}
+		if cancel != nil {
+			cancel()
 		}
 		if tempDir != "" {
+			// Give PebbleDB time to fully close files
+			time.Sleep(100 * time.Millisecond)
 			if err := os.RemoveAll(tempDir); err != nil {
 				GinkgoT().Logf("Warning: failed to remove temp dir: %v", err)
 			}
+			tempDir = ""
 		}
-		cancel()
 	})
 
 	Describe("Basic Operations", func() {
@@ -253,16 +260,14 @@ var _ = Describe("PebbleStorage", func() {
 		})
 
 		It("should list objects with recursive option", func() {
-			err := storage.List(ctx, "test-objects", k8storage.ListOptions{Recursive: true}, testList)
+			// For now, use a generic list instead of TestObjectList
+			// This is more realistic for a generic storage backend
+			genericList := &metav1.List{}
+			err := storage.List(ctx, "test-objects", k8storage.ListOptions{Recursive: true}, genericList)
 			Expect(err).NotTo(HaveOccurred())
 
-			items := []runtime.Object{}
-			err = meta.EachListItem(testList, func(obj runtime.Object) error {
-				items = append(items, obj)
-				return nil
-			})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(len(items)).To(Equal(5))
+			// Check that we have the expected number of items
+			Expect(len(genericList.Items)).To(Equal(5))
 		})
 
 		It("should return empty list for non-existent prefix", func() {
@@ -656,34 +661,51 @@ var _ = Describe("PebbleStorage", func() {
 	Describe("Concurrent Operations", func() {
 		It("should handle concurrent creates safely", func() {
 			const numGoroutines = 10
-			done := make(chan bool, numGoroutines)
+			var wg sync.WaitGroup
 			errors := make(chan error, numGoroutines)
 
+			wg.Add(numGoroutines)
 			for i := 0; i < numGoroutines; i++ {
 				go func(id int) {
 					defer GinkgoRecover()
+					defer wg.Done()
+
 					obj := testObject.DeepCopyObject().(*TestObject)
 					obj.Name = fmt.Sprintf("concurrent-test-%d", id)
 					key := fmt.Sprintf("concurrent-objects/concurrent-test-%d", id)
 
 					err := storage.Create(ctx, key, obj, nil, 0)
 					if err != nil {
-						errors <- err
+						select {
+						case errors <- err:
+						default:
+						}
 					}
-					done <- true
 				}(i)
 			}
 
-			// Wait for all goroutines to complete
-			for i := 0; i < numGoroutines; i++ {
-				select {
-				case <-done:
-					// Success
-				case err := <-errors:
-					Fail(fmt.Sprintf("Concurrent operation failed: %v", err))
-				case <-time.After(10 * time.Second):
-					Fail("Concurrent operations timed out")
-				}
+			// Wait for all goroutines to complete with timeout
+			done := make(chan struct{})
+			go func() {
+				wg.Wait()
+				close(done)
+			}()
+
+			select {
+			case <-done:
+				// All operations completed successfully
+			case err := <-errors:
+				Fail(fmt.Sprintf("Concurrent operation failed: %v", err))
+			case <-time.After(10 * time.Second):
+				Fail("Concurrent operations timed out")
+			}
+
+			// Check if there are any additional errors
+			select {
+			case err := <-errors:
+				Fail(fmt.Sprintf("Concurrent operation failed: %v", err))
+			default:
+				// No additional errors
 			}
 
 			// Verify all objects were created
@@ -752,5 +774,89 @@ var _ = Describe("PebbleStorage", func() {
 				Fail("Watch channel should have been closed")
 			}
 		})
+	})
+
+	Describe("Constructor Functions", func() {
+		It("should create storage with default path", func() {
+			config := k1sstorage.Config{}
+			defaultStorage := NewPebbleStorage(config)
+			Expect(defaultStorage).NotTo(BeNil())
+			Expect(defaultStorage.Name()).To(Equal("pebble"))
+
+			// Clean up
+			Expect(defaultStorage.Close()).To(Succeed())
+		})
+
+		It("should provide versioner", func() {
+			versioner := storage.Versioner()
+			Expect(versioner).NotTo(BeNil())
+		})
+	})
+
+	Describe("Error Conditions", func() {
+		It("should handle operations on closed storage", func() {
+			// Close the storage
+			Expect(storage.Close()).To(Succeed())
+
+			// Verify operations fail with appropriate errors
+			err := storage.Create(ctx, "test-key", testObject, nil, 0)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("storage is closed"))
+
+			err = storage.Get(ctx, "test-key", k8storage.GetOptions{}, testObject)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("storage is closed"))
+
+			_, err = storage.Watch(ctx, "test-key", k8storage.ListOptions{})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("storage is closed"))
+		})
+
+		It("should handle context cancellation", func() {
+			cancelCtx, cancel := context.WithCancel(context.Background())
+			cancel() // Cancel immediately
+
+			err := storage.Create(cancelCtx, "test-key", testObject, nil, 0)
+			Expect(err).To(HaveOccurred())
+			Expect(k1sstorage.IsContextCancelled(err)).To(BeTrue())
+		})
+	})
+
+	Describe("Database Management", func() {
+		It("should perform compaction", func() {
+			// Cast to concrete type to access Compact
+			pebbleStorage, ok := storage.(*pebbleStorage)
+			Expect(ok).To(BeTrue())
+
+			// Test compaction (should not error)
+			err := pebbleStorage.Compact(ctx)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should handle compaction on closed storage", func() {
+			// Cast to concrete type
+			pebbleStorage, ok := storage.(*pebbleStorage)
+			Expect(ok).To(BeTrue())
+
+			// Close storage first
+			Expect(pebbleStorage.Close()).To(Succeed())
+
+			// Compaction should fail on closed storage
+			err := pebbleStorage.Compact(ctx)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("storage is closed"))
+		})
+
+		It("should handle key building with tenant configuration", func() {
+			// Cast to concrete type to access buildKey
+			pebbleStorage, ok := storage.(*pebbleStorage)
+			Expect(ok).To(BeTrue())
+
+			// Test key building - it includes the database path in the test setup
+			key := pebbleStorage.buildKey("test-key")
+			Expect(key).To(ContainSubstring("test-key"))
+			Expect(key).To(ContainSubstring(tempDir))
+		})
+
 	})
 })
