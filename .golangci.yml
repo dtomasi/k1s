@@ -4,7 +4,6 @@ version: "2"
 
 run:
   timeout: 10m
-  go: "1.25.0"
   issues-exit-code: 1
   tests: true
   modules-download-mode: readonly
@@ -135,6 +134,12 @@ issues:
       text: "embed"
       linters:
         - govet
+        
+    # Allow embedded field access in test DeepCopy implementations
+    - path: _test\.go
+      text: "QF1008:"
+      linters:
+        - staticcheck
         
     # Allow underscore assignments for ignored return values
     - linters:

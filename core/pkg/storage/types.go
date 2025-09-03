@@ -2,6 +2,9 @@ package storage
 
 import (
 	"context"
+	"fmt"
+	"strconv"
+	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -110,6 +113,20 @@ func (v SimpleVersioner) ParseWatchResourceVersion(resourceVersion string) (uint
 	return ParseResourceVersion(resourceVersion)
 }
 
+// ParseResourceVersion parses a resource version string
+func (v SimpleVersioner) ParseResourceVersion(resourceVersion string) (uint64, error) {
+	if resourceVersion == "" {
+		return 0, nil
+	}
+
+	// Try to parse as uint64
+	if version, err := strconv.ParseUint(resourceVersion, 10, 64); err == nil {
+		return version, nil
+	}
+
+	return 0, fmt.Errorf("invalid resource version: %s", resourceVersion)
+}
+
 // WatchEvent represents a single watch event
 type WatchEvent struct {
 	Type   watch.EventType
@@ -124,6 +141,7 @@ type SimpleWatch struct {
 	result chan *WatchEvent
 	done   chan struct{}
 	closed bool
+	mu     sync.Mutex
 }
 
 // NewSimpleWatch creates a new SimpleWatch instance
@@ -136,6 +154,8 @@ func NewSimpleWatch() *SimpleWatch {
 
 // Stop implements watch.Interface
 func (w *SimpleWatch) Stop() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if !w.closed {
 		w.closed = true
 		close(w.done)
