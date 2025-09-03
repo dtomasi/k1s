@@ -6,8 +6,8 @@ require (
 	github.com/dtomasi/k1s/core v0.0.0
 	github.com/onsi/ginkgo/v2 v2.22.0
 	github.com/onsi/gomega v1.36.1
-	k8s.io/apimachinery v0.31.1
-	k8s.io/apiserver v0.31.1
+	k8s.io/apimachinery v0.34.0
+	k8s.io/apiserver v0.34.0
 )
 
 require (
