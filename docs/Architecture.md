@@ -1,11 +1,13 @@
 # K1S Architecture
 
 **Related Documentation:**
+- [Two-Tier Runtime Architecture](Two-Tier-Runtime-Architecture.md) - CoreClient vs ManagedRuntime design
 - [Core Resources Architecture](Core-Resources-Architecture.md) - Built-in Kubernetes resources
 - [RBAC Architecture](RBAC-Architecture.md) - Role-based access control integration  
 - [Kubernetes Compatibility](Kubernetes-Compatibility.md) - Compatibility guide and differences
 - [CLI-Runtime Package](CLI-Runtime-Package.md) - CLI instrumentation package
 - [Controller-Runtime Package](Controller-Runtime-Package.md) - Controller runtime for CLI environments
+- [Graceful Shutdown & Work Tracking](Graceful-Shutdown-Work-Tracking.md) - Work tracking and graceful shutdown
 - [Implementation Plan](Implementation-Plan.md) - Phased implementation strategy
 - [Project Structure](Project-Structure.md) - Module and package organization
 
@@ -21,6 +23,7 @@ K1s is a **Kubernetes-native CLI runtime** that provides embedded storage, event
 - **Direct Storage Access:** No intermediate API server layer
 - **On-Demand Operations:** No background controllers or continuous reconciliation
 - **Fast Startup:** Optimized for quick initialization and shutdown (<100ms)
+- **Graceful Shutdown:** Metrics-based work tracking ensures operation completion
 - **Process Isolation:** Multiple CLI processes may access same storage files safely
 
 ## Core Design Principles
@@ -41,12 +44,13 @@ K1s is a **Kubernetes-native CLI runtime** that provides embedded storage, event
 - Tenant-aware key prefixing and bucket strategies
 - Shared database file support with strong isolation
 
-### 4. CLI-Optimized Performance
-- **Fast Startup:** <100ms initialization time
+### 4. Two-Tier Runtime Performance
+- **CoreClient:** <25ms startup for standard CLI operations (get, create, list, delete, patch)
+- **ManagedRuntime:** <75ms startup for advanced features (watch, controllers, events)
+- **Plugin Awareness:** Lightweight plugin discovery without full plugin loading
 - **Lazy Loading:** Load components only when needed
-- **On-Demand Informers:** Start informers only for active operations
-- **Direct Event Recording:** No background event processing
-- **Triggered Controllers:** Execute on CLI triggers, not continuous loops
+- **On-Demand Operations:** Background components start only when required
+- **Work Completion Guarantees:** Metrics-based tracking prevents incomplete operations
 
 ## System Architecture
 
@@ -70,10 +74,11 @@ graph TB
             PLUGIN[Plugin Manager<br/>• Restricted Clients<br/>• Permission Scoping<br/>• Sandbox Isolation]
         end
         
-        subgraph "K1S Core Runtime"
-            RUNTIME[K1S Runtime<br/>• Orchestration<br/>• Lifecycle Management<br/>• RBAC Integration]
-            CLIENT[K1S Client<br/>• CRUD Operations<br/>• Strategic Merge<br/>• Status Subresources<br/>• Permission Checks]
-            EVENTS[Event System<br/>• Direct Event Recording<br/>• Immediate Storage Write<br/>• User Attribution]
+        subgraph "K1S Two-Tier Runtime"
+            CORE[CoreClient<br/>• Fast CLI Operations<br/>• Plugin Discovery<br/>• <25ms Startup<br/>• Standard CRUD]
+            MANAGED[ManagedRuntime<br/>• Advanced Features<br/>• Controller Support<br/>• <75ms Startup<br/>• Watch & Events]
+            EVENTS[Event System<br/>• Direct Event Recording<br/>• Background Broadcasting<br/>• User Attribution]
+            WORKTRACK[Work Tracking Registry<br/>• Metrics Aggregation<br/>• Graceful Shutdown<br/>• Component Coordination]
         end
         
         subgraph "Resource Management Layer"
@@ -94,8 +99,8 @@ graph TB
         end
         
         subgraph "Storage Backends"
-            MEMORY[Memory Storage<br/>• In-Memory Maps<br/>• >10K ops/sec]
-            PEBBLE[Pebble Storage<br/>• LSM-Tree<br/>• >3K ops/sec]
+            MEMORY[Memory Storage<br/>• In-Memory Maps<br/>• >10K ops/sec<br/>• Enhanced Metrics]
+            PEBBLE[Pebble Storage<br/>• LSM-Tree<br/>• >3K ops/sec<br/>• Enhanced Metrics]
         end
     end
     
@@ -127,6 +132,7 @@ graph TB
     RUNTIME --> VALIDATION
     RUNTIME --> DEFAULTING
     RUNTIME --> INFORMERS
+    RUNTIME --> WORKTRACK
     RUNTIME -.->|When RBAC| AUTHZ
     
     %% Client Connections
@@ -156,6 +162,12 @@ graph TB
     STORAGE --> STORAGE_IMPL
     SCHEME --> CODEC
     
+    %% Work Tracking Connections
+    WORKTRACK --> CLIENT
+    WORKTRACK --> STORAGE
+    WORKTRACK --> EVENTS
+    CTRLRT --> WORKTRACK
+    
     %% Storage Backend Selection (User Choice)
     STORAGE_IMPL --> MEMORY
     STORAGE_IMPL --> PEBBLE
@@ -173,7 +185,7 @@ graph TB
     class CLI,TRIGGER appLayer
     class AUTH,AUTHZ,AUDIT securityLayer
     class CLIRT,CTRLRT,PLUGIN runtimePkg
-    class RUNTIME,CLIENT,EVENTS coreRuntime
+    class RUNTIME,CLIENT,EVENTS,WORKTRACK coreRuntime
     class REGISTRY,VALIDATION,DEFAULTING,INFORMERS resourceMgmt
     class CODEC,SCHEME,STORAGE coreInfra
     class STORAGE_IMPL storageTenant
@@ -232,7 +244,39 @@ func (s *ProcessSafeStorage) Create(ctx context.Context, key string, obj runtime
 }
 ```
 
-### Challenge 3: Watch System for Short-Lived Processes
+### Challenge 3: Graceful Shutdown with Work Completion
+**Requirement:** Ensure all operations complete before process termination
+
+**Solution: Metrics-based Work Tracking**
+```go
+type EnhancedMetrics struct {
+    operations    uint64  // Completed work
+    errors        uint64  // Failed work  
+    watchers      uint64  // Long-running work
+    inFlight      uint64  // Active operations (NEW)
+    inFlightPeak  uint64  // Peak concurrent ops (NEW)  
+    totalStarted  uint64  // Total work started (NEW)
+}
+
+func (r *Runtime) GracefulShutdown(timeout time.Duration) error {
+    // Stop accepting new work
+    r.stopAcceptingWork()
+    
+    // Wait for active work completion
+    deadline := time.Now().Add(timeout)
+    for time.Now().Before(deadline) {
+        if !r.workRegistry.IsAnyWorkInProgress() {
+            return nil // All work completed
+        }
+        r.logWorkProgress()
+        time.Sleep(500 * time.Millisecond)
+    }
+    
+    return fmt.Errorf("shutdown timeout: work still in progress")
+}
+```
+
+### Challenge 4: Watch System for Short-Lived Processes
 **Requirement:** Resource watching without long-running processes
 
 **Solution: Persistent Event Log with Replay**
@@ -480,10 +524,12 @@ type StorageSink interface {
 
 ## Performance Targets
 
-### CLI Performance
-- **Startup time:** <100ms cold start
+### Two-Tier Runtime Performance
+- **CoreClient startup:** <25ms (standard CLI operations)
+- **ManagedRuntime startup:** <75ms (advanced features)
+- **CoreClient memory:** <10MB (minimal footprint)
+- **ManagedRuntime memory:** <50MB (full features)
 - **Command response:** <50ms for simple operations
-- **Memory usage:** <50MB for basic CLI operations
 - **Concurrent access:** Multiple CLI processes supported
 
 ### Storage Performance
@@ -497,14 +543,14 @@ type StorageSink interface {
 - **Event replay:** <100ms for typical CLI session gaps
 - **Persistent log:** Efficient append-only storage
 
-## K1S Initialization Patterns
+## K1S Two-Tier Initialization Patterns
 
-K1s uses a clean, modular initialization approach with dependency injection to ensure small binaries and clear module boundaries.
+K1s provides two initialization patterns optimized for different use cases: CoreClient for fast CLI operations and ManagedRuntime for advanced features.
 
-### Core Initialization Pattern
+### CoreClient Initialization Pattern (Fast CLI Operations)
 
 ```go
-// 1. Storage Backend Creation (User Choice)
+// 1. Storage Backend Creation (User Choice) 
 // Only import/link what you use - enables small binaries
 import "github.com/dtomasi/k1s/storage/pebble" // or memory
 
@@ -513,25 +559,62 @@ if err != nil {
     log.Fatal(err)
 }
 
-// 2. K1S Runtime Creation
-// Required: Storage instance (dependency injection)
-// Optional: Functional options with sensible defaults
-runtime, err := k1s.NewRuntime(
-    storage,                    // Required parameter - concrete instance
-    k1s.WithTenant("my-app"),   // Optional (default: "default")
-    k1s.WithRBAC(rbacConfig),   // Optional (default: disabled)
-)
+// 2. CoreClient for fast CLI operations (~25ms startup)
+client, err := k1s.NewCoreClient(k1s.CoreClientOptions{
+    Storage:  storage,
+    Scheme:   k1s.GetScheme(),
+    Registry: k1s.GetRegistry(),
+    // Plugin discovery included by default
+})
 if err != nil {
-    log.Fatal(err)  
+    log.Fatal(err)
 }
-defer runtime.Stop()
 
-// 3. Core Resources are automatically registered
-// Namespace, ConfigMap, Secret, ServiceAccount, Event
-client := runtime.GetClient()  // Ready to use immediately
+// 3. Standard CLI operations work immediately
+var item inventoryv1alpha1.Item
+key := client.ObjectKey{Namespace: "default", Name: "my-item"}
+if err := client.Get(ctx, key, &item); err != nil {
+    log.Fatal(err)
+}
+
 ```
 
-### CLI Application Integration
+### ManagedRuntime Initialization Pattern (Advanced Features)
+
+```go
+// 1. Same storage backend setup
+storage, err := pebble.NewStorage("./data/app.db")
+if err != nil {
+    log.Fatal(err)
+}
+
+// 2. ManagedRuntime for advanced features (~75ms startup)
+runtime, err := k1s.NewManagedRuntime(k1s.ManagedRuntimeOptions{
+    CoreClientOptions: k1s.CoreClientOptions{
+        Storage:  storage,
+        Scheme:   k1s.GetScheme(),
+        Registry: k1s.GetRegistry(),
+    },
+    EnableControllers: true,    // Enable controller execution
+    EnableInformers:   true,    // Enable watch/informer system  
+    EnableEvents:      true,    // Enable event broadcasting
+})
+if err != nil {
+    log.Fatal(err)
+}
+defer runtime.Shutdown(ctx)
+
+// 3. Start runtime background components
+if err := runtime.Start(ctx); err != nil {
+    log.Fatal(err)
+}
+
+// 4. Same Client interface, extended capabilities
+client := runtime.Client()  // Compatible with CoreClient
+// Can now use watch, controllers, advanced events
+```
+
+### CLI Application Integration (CoreClient Example)
 
 ```go
 import (
@@ -546,22 +629,22 @@ func main() {
         log.Fatal(err)
     }
     
-    // 2. Create k1s runtime
-    runtime, err := k1s.NewRuntime(
-        storage,
-        k1s.WithTenant("inventory-app"),
-    )
+    // 2. Use CoreClient for fast CLI operations
+    client, err := k1s.NewCoreClient(k1s.CoreClientOptions{
+        Storage:  storage,
+        Scheme:   k1s.GetScheme(),
+        Registry: k1s.GetRegistry(),
+    })
     if err != nil {
         log.Fatal(err)
     }
-    defer runtime.Stop()
     
-    // 3. Create CLI commands directly
+    // 3. Create CLI commands using cli-runtime helpers  
     rootCmd := &cobra.Command{Use: "inventory-cli"}
     rootCmd.AddCommand(
-        cliruntime.NewGetCommand(runtime),      // k1s get items
-        cliruntime.NewCreateCommand(runtime),   // k1s create -f item.yaml
-        cliruntime.NewApplyCommand(runtime),    // k1s apply -f item.yaml
+        cliruntime.NewGetCommand(client),      // k1s get items (fast)
+        cliruntime.NewCreateCommand(client),   // k1s create -f item.yaml
+        cliruntime.NewApplyCommand(client),    // k1s apply -f item.yaml
         cliruntime.NewDeleteCommand(runtime),   // k1s delete item my-item
     )
     
@@ -711,6 +794,132 @@ type RestrictedPluginClient struct {
 }
 ```
 
+## Plugin Discovery & Security Architecture
+
+### Simple Plugin Discovery (go-plugin inspired)
+
+```go
+// core/pkg/plugins/discovery.go
+type PluginDiscovery struct {
+    searchPaths []string
+    validators  []PluginValidator
+}
+
+func NewPluginDiscovery(paths ...string) *PluginDiscovery {
+    if len(paths) == 0 {
+        paths = []string{"./plugins"} // Default
+    }
+    return &PluginDiscovery{
+        searchPaths: paths,
+        validators:  []PluginValidator{&WASMValidator{}, &ConfigValidator{}},
+    }
+}
+
+func (pd *PluginDiscovery) DiscoverPlugins() ([]PluginInfo, error) {
+    var plugins []PluginInfo
+    
+    for _, path := range pd.searchPaths {
+        // WASM plugins
+        wasmFiles, _ := filepath.Glob(filepath.Join(path, "*.wasm"))
+        for _, file := range wasmFiles {
+            if plugin, err := pd.loadWASMPlugin(file); err == nil {
+                plugins = append(plugins, plugin)
+            }
+        }
+        
+        // Config-based plugins  
+        configFiles, _ := filepath.Glob(filepath.Join(path, "*-plugin.yaml"))
+        for _, file := range configFiles {
+            if plugin, err := pd.loadConfigPlugin(file); err == nil {
+                plugins = append(plugins, plugin)
+            }
+        }
+    }
+    
+    return plugins, nil
+}
+```
+
+### Pragmatic Security Model
+
+**Multi-Layer Security:**
+1. **WASM Sandbox**: Memory isolation and capability-based access (inherited from WASM runtime)
+2. **Resource Restrictions**: Simple allow-lists for resources, verbs, and namespaces  
+3. **RBAC Integration**: Optional standard Kubernetes RBAC when enabled
+4. **Process Isolation**: WASM provides better isolation than separate processes
+
+```go
+// core/pkg/plugins/security.go  
+type PluginSecurityManager struct {
+    rbacEnabled bool
+    authorizer  auth.Authorizer // nil when RBAC disabled
+}
+
+func (psm *PluginSecurityManager) CreateSecureClient(pluginName string, baseClient client.Client) client.Client {
+    if !psm.rbacEnabled {
+        return baseClient // Passthrough when RBAC disabled
+    }
+    
+    // Simple restricted client
+    return &RestrictedClient{
+        base:       baseClient,
+        pluginName: pluginName,
+        authorizer: psm.authorizer,
+    }
+}
+
+// Simple plugin restrictions
+type RestrictedClient struct {
+    base       client.Client
+    pluginName string
+    authorizer auth.Authorizer
+    
+    // Basic security constraints
+    allowedResources  []string
+    allowedVerbs      []string  
+    allowedNamespaces []string
+    maxConcurrentOps  int
+}
+```
+
+### Plugin Configuration
+
+```yaml
+# plugins/item-validator-plugin.yaml
+name: "item-validator"
+type: "wasm"
+path: "./item-validator.wasm"
+version: "v1.0.0"
+
+# Simple security config
+security:
+  allowedResources:
+    - "items"
+    - "events"
+  allowedVerbs:
+    - "get" 
+    - "list"
+    - "create" # For events
+  maxConcurrentRequests: 10
+```
+
+### Progressive Security Implementation
+
+**Phase 1: Basic Discovery + WASM Sandbox**
+- Directory-based plugin discovery
+- WASM memory isolation (automatic)
+- Simple resource restrictions
+
+**Phase 2: RBAC Integration** 
+- Plugin-aware RBAC policies
+- ServiceAccount-based plugin identity
+- Audit logging for plugin actions
+
+**Phase 3: Advanced Security**
+- Cryptographic plugin validation
+- Adaptive rate limiting
+- Threat detection and response
+
 ## Architecture Benefits
 
 This architecture provides:
@@ -720,10 +929,11 @@ This architecture provides:
 3. **Simple Multi-Tenancy:** Built-in isolation at the storage layer with simple prefix strategies
 4. **Complete Event System:** Kubernetes event recording with CLI-optimized persistence
 5. **Flexible Controller Runtime:** Both embedded and WASM plugin controller support
-6. **Easy CLI Integration:** CLI-runtime package for command-line tool development
-7. **Embedded Storage:** Multiple storage backends optimized for different use cases
-8. **Modular Design:** Clean separation allowing applications to use only needed components
-9. **Progressive Security:** Optional RBAC layer with standard Kubernetes RBAC resources
-10. **Enterprise Ready:** Support for authentication, authorization, audit logging, and plugin security
+6. **Pragmatic Plugin Security:** Simple discovery with progressive security layers
+7. **Easy CLI Integration:** CLI-runtime package for command-line tool development
+8. **Embedded Storage:** Multiple storage backends optimized for different use cases
+9. **Modular Design:** Clean separation allowing applications to use only needed components
+10. **Progressive Security:** Optional RBAC layer with standard Kubernetes RBAC resources
+11. **Enterprise Ready:** Support for authentication, authorization, audit logging, and plugin security
 
 This enables building both CLI tools and controller applications with embedded storage while maintaining full compatibility with the Kubernetes ecosystem, optimizing for CLI-specific performance requirements, and providing enterprise-grade security when needed.

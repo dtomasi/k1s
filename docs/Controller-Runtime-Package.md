@@ -3,6 +3,7 @@
 **Related Documentation:**
 - [CLI-Runtime Package](CLI-Runtime-Package.md) - CLI instrumentation package  
 - [Architecture](Architecture.md) - Overall k1s system architecture
+- [Graceful Shutdown & Work Tracking](Graceful-Shutdown-Work-Tracking.md) - Work tracking and graceful shutdown
 
 ## Overview
 
@@ -22,8 +23,9 @@ The Controller-Runtime package (`core/pkg/controller/`) provides a kubernetes co
 
 ### 3. **CLI-Optimized Execution**
 - Triggered execution instead of continuous loops
-- Context-based start/stop lifecycle
+- Context-based start/stop lifecycle  
 - Event-driven reconciliation
+- Work tracking for graceful shutdown
 
 ## Package Structure
 
@@ -33,7 +35,8 @@ core/pkg/controller/
 ├── builder.go          # Controller builder API
 ├── reconciler.go       # Reconciler interface
 ├── interfaces.go       # Manager and controller interfaces
-└── options.go          # Configuration options
+├── options.go          # Configuration options
+└── worktracking.go     # Work tracking integration
 ```
 
 ## 1. Manager Creation (Kubernetes-Compatible)
@@ -143,7 +146,37 @@ func (m *manager) Start(ctx context.Context) error {
     // Wait for context cancellation
     <-ctx.Done()
     
-    // Stop all controllers
+    // Graceful shutdown - wait for active reconciliation to complete
+    return m.gracefulShutdown()
+}
+
+func (m *manager) gracefulShutdown() error {
+    // Signal controllers to stop accepting new reconcile requests
+    for _, controller := range m.controllers {
+        controller.StopAcceptingWork()
+    }
+    
+    // Wait for active reconciliation work to complete
+    timeout := 30 * time.Second // configurable
+    deadline := time.Now().Add(timeout)
+    
+    for time.Now().Before(deadline) {
+        activeWork := false
+        for _, controller := range m.controllers {
+            if controller.HasActiveWork() {
+                activeWork = true
+                break
+            }
+        }
+        
+        if !activeWork {
+            break
+        }
+        
+        time.Sleep(500 * time.Millisecond)
+    }
+    
+    // Force stop all controllers
     for _, controller := range m.controllers {
         controller.Stop()
     }
@@ -408,3 +441,216 @@ The Controller-Runtime package focuses on **compatibility** with kubernetes cont
 - **Event Integration**: Uses k1s event system for recording
 
 This allows kubernetes controller code to run unchanged in k1s CLI environments while maintaining the familiar development patterns.
+
+## 5. Work Tracking & Graceful Shutdown Integration
+
+### Work Tracking Interface
+
+Controllers integrate with k1s work tracking system to ensure graceful shutdown:
+
+```go
+// Enhanced Controller interface with work tracking
+type Controller interface {
+    Start(ctx context.Context) error
+    Stop()
+    
+    // Work tracking methods for graceful shutdown
+    StopAcceptingWork()
+    HasActiveWork() bool
+}
+
+// Controller implementation with work tracking
+type controllerImpl struct {
+    manager         Manager
+    reconciler      reconcile.Reconciler
+    forType         client.Object
+    options         controller.Options
+    
+    // Work tracking
+    workTracker     worktracking.WorkTracker
+    activeWork      sync.WaitGroup
+    acceptingWork   atomic.Bool
+    shutdownCh      chan struct{}
+}
+
+func (c *controllerImpl) Start(ctx context.Context) error {
+    c.acceptingWork.Store(true)
+    
+    go func() {
+        <-ctx.Done()
+        close(c.shutdownCh)
+    }()
+    
+    // Start reconciliation loop
+    return c.reconcileLoop(ctx)
+}
+
+func (c *controllerImpl) reconcileLoop(ctx context.Context) error {
+    for {
+        select {
+        case <-c.shutdownCh:
+            return nil
+        case req := <-c.workQueue:
+            if !c.acceptingWork.Load() {
+                continue // Skip work during shutdown
+            }
+            
+            // Track reconciliation work
+            c.activeWork.Add(1)
+            workID := c.workTracker.StartWork("controller.reconcile")
+            
+            go func(request reconcile.Request) {
+                defer c.activeWork.Done()
+                defer func(success *bool) {
+                    c.workTracker.EndWork(workID, *success)
+                }(&success)
+                
+                _, err := c.reconciler.Reconcile(ctx, request)
+                success = (err == nil)
+                
+                if err != nil {
+                    // Handle reconcile error
+                    log.Error(err, "reconciliation failed", "request", request)
+                }
+            }(req)
+        }
+    }
+}
+
+func (c *controllerImpl) StopAcceptingWork() {
+    c.acceptingWork.Store(false)
+}
+
+func (c *controllerImpl) HasActiveWork() bool {
+    // Use WaitGroup with timeout to check for active work
+    done := make(chan struct{})
+    go func() {
+        c.activeWork.Wait()
+        close(done)
+    }()
+    
+    select {
+    case <-done:
+        return false
+    case <-time.After(10 * time.Millisecond):
+        return true
+    }
+}
+```
+
+### Graceful Shutdown Sequence
+
+The controller runtime ensures all reconciliation work completes before shutdown:
+
+```go
+func (m *manager) Start(ctx context.Context) error {
+    // ... controller startup ...
+    
+    // Wait for shutdown signal
+    <-ctx.Done()
+    log.Info("Received shutdown signal, initiating graceful shutdown")
+    
+    return m.gracefulShutdown()
+}
+
+func (m *manager) gracefulShutdown() error {
+    log.Info("Phase 1: Stopping acceptance of new reconcile requests")
+    for _, controller := range m.controllers {
+        controller.StopAcceptingWork()
+    }
+    
+    log.Info("Phase 2: Waiting for active reconciliation to complete")
+    timeout := 30 * time.Second
+    deadline := time.Now().Add(timeout)
+    
+    for time.Now().Before(deadline) {
+        activeWork := false
+        for i, controller := range m.controllers {
+            if controller.HasActiveWork() {
+                log.Info("Waiting for controller reconciliation", 
+                    "controller", i, "remaining", time.Until(deadline))
+                activeWork = true
+                break
+            }
+        }
+        
+        if !activeWork {
+            log.Info("All reconciliation work completed")
+            break
+        }
+        
+        time.Sleep(500 * time.Millisecond)
+    }
+    
+    // Phase 3: Force stop all controllers
+    log.Info("Phase 3: Force stopping all controllers")
+    for _, controller := range m.controllers {
+        controller.Stop()
+    }
+    
+    return nil
+}
+```
+
+### Usage with Work Tracking
+
+Controllers work automatically with the work tracking system:
+
+```go
+func main() {
+    // Create k1s runtime with work tracking
+    runtime, err := k1s.NewRuntime(storage)
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // Create controller manager (work tracking enabled automatically)
+    mgr, err := controller.NewManager(runtime, controller.Options{
+        GracefulShutdownTimeout: 30 * time.Second,
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // Register controllers (no changes needed)
+    if err = (&ItemReconciler{
+        Client: mgr.GetClient(),
+        Scheme: mgr.GetScheme(),
+    }).SetupWithManager(mgr); err != nil {
+        log.Fatal(err)
+    }
+    
+    // Start with signal handling
+    ctx := setupGracefulShutdown() // handles SIGTERM/SIGINT
+    
+    if err := mgr.Start(ctx); err != nil {
+        log.Fatal(err)
+    }
+    
+    log.Info("All controllers shut down gracefully")
+}
+```
+
+## Benefits with Work Tracking
+
+### 1. **Zero Data Loss**
+- All active reconciliation completes before shutdown
+- No partial updates or incomplete operations
+- Consistent resource state maintained
+
+### 2. **Predictable Shutdown**
+- Configurable timeout behavior
+- Structured logging of shutdown progress
+- Clear visibility into remaining work
+
+### 3. **Developer Transparency**  
+- Existing controller code works unchanged
+- Work tracking happens automatically
+- Standard Kubernetes controller patterns preserved
+
+### 4. **Production Ready**
+- Handles signal-based shutdown (SIGTERM, SIGINT)
+- Graceful degradation on timeout
+- Integration with k1s runtime lifecycle
+
+This integration ensures that controller-runtime applications can shut down gracefully while maintaining full compatibility with existing Kubernetes controller development patterns.

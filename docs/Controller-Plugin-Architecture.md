@@ -237,18 +237,70 @@ const (
 
 ## Plugin Loading and Discovery
 
-### WASM Plugin Discovery Workflow
+### Pragmatic Plugin Discovery (go-plugin inspired)
+
+K1s uses a simple, proven discovery mechanism inspired by HashiCorp's go-plugin:
+
+```go
+// core/pkg/plugins/discovery.go
+type PluginDiscovery struct {
+    searchPaths []string
+    validators  []PluginValidator
+}
+
+func NewPluginDiscovery(paths ...string) *PluginDiscovery {
+    if len(paths) == 0 {
+        paths = []string{"./plugins"} // Default
+    }
+    return &PluginDiscovery{
+        searchPaths: paths,
+        validators:  []PluginValidator{&WASMValidator{}, &ConfigValidator{}},
+    }
+}
+
+func (pd *PluginDiscovery) DiscoverPlugins() ([]PluginInfo, error) {
+    var plugins []PluginInfo
+    
+    for _, path := range pd.searchPaths {
+        // WASM plugins
+        wasmFiles, _ := filepath.Glob(filepath.Join(path, "*.wasm"))
+        for _, file := range wasmFiles {
+            if plugin, err := pd.loadWASMPlugin(file); err == nil {
+                plugins = append(plugins, plugin)
+            }
+        }
+        
+        // Config-based plugins  
+        configFiles, _ := filepath.Glob(filepath.Join(path, "*-plugin.yaml"))
+        for _, file := range configFiles {
+            if plugin, err := pd.loadConfigPlugin(file); err == nil {
+                plugins = append(plugins, plugin)
+            }
+        }
+    }
+    
+    return plugins, nil
+}
+```
+
+### Plugin Discovery Workflow
 
 ```mermaid
 graph TD
-    A[Application Startup] --> B[Scan for .wasm Files]
-    B --> C[Validate WASM Modules]
-    C --> D[Load WASM Module]
+    A[Application Startup] --> B[Initialize Plugin Discovery]
+    B --> C[Scan Search Paths]
+    C --> D[Find .wasm Files]
+    C --> E[Find *-plugin.yaml Files]
     
-    D --> E[Instantiate WASM Runtime]
-    E --> F[Call GetMetadata Export]
-    F --> G[Register with Manager]
-    G --> H[Plugin Ready]
+    D --> F[Validate WASM Module]
+    E --> G[Validate Plugin Config]
+    
+    F --> H[Extract Metadata]
+    G --> H
+    
+    H --> I[Security Validation]
+    I --> J[Register with Manager]
+    J --> K[Plugin Ready for Loading]
 ```
 
 ### WASM Plugin Configuration
@@ -331,67 +383,132 @@ graph TD
 
 ## Security and Isolation
 
-### Security Model
+### Pragmatic Security Model (Multi-Layer Defense)
+
+K1s uses a practical security approach combining the best patterns from go-plugin, WASM, and Kubernetes:
 
 ```mermaid
 graph TD
     A[Application Process] --> B[Embedded Controllers]
-    A --> C[gRPC Security Boundary]
-    A --> D[WASM Sandbox]
+    A --> C[WASM Sandbox]
     
-    E[Plugin Process] --> C
-    C --> F[Client Proxy]
-    D --> F
+    C --> D[Plugin Security Manager]
+    D --> E[Restricted Client]
     
-    F --> G[RBAC Integration]
-    F --> H[Audit Logging]
+    E --> F[Resource Filtering]
+    E --> G[RBAC Integration]
+    E --> H[Audit Logging]
     
-    E --> I[CPU Limits]
-    E --> J[Memory Limits]
-    E --> K[Network Isolation]
+    C --> I[Memory Isolation]
+    C --> J[Capability Control]
+    C --> K[Bounds Checking]
 ```
 
-### Plugin Permission Model
+### Simple Security Implementation
+
+**Phase 1: Basic Security (WASM + Resource Restrictions)**
 
 ```go
-// Plugin permission configuration
-type PluginPermissions struct {
-    // Resource access permissions
-    Resources []ResourcePermission
-    
-    // Operation permissions
-    Operations []OperationType
-    
-    // Namespace restrictions
-    Namespaces []string  // Empty means all namespaces
-    
-    // Rate limiting
-    RateLimit *RateLimitConfig
-    
-    // Resource quotas
-    ResourceQuota *ResourceQuotaConfig
+// core/pkg/plugins/security.go
+type PluginSecurityManager struct {
+    rbacEnabled bool
+    authorizer  auth.Authorizer // nil when RBAC disabled
 }
 
-type ResourcePermission struct {
-    Group     string
-    Version   string
-    Resource  string
-    Verbs     []string  // get, list, create, update, patch, delete, watch
+func (psm *PluginSecurityManager) CreateSecureClient(pluginName string, baseClient client.Client) client.Client {
+    if !psm.rbacEnabled {
+        return baseClient // Passthrough when RBAC disabled
+    }
+    
+    return &RestrictedClient{
+        base:       baseClient,
+        pluginName: pluginName,
+        authorizer: psm.authorizer,
+    }
 }
 
-type RateLimitConfig struct {
-    RequestsPerSecond int
-    BurstSize         int
-    TimeWindow        time.Duration
+// Simple plugin restrictions
+type RestrictedClient struct {
+    base       client.Client
+    pluginName string
+    authorizer auth.Authorizer
+    
+    // Basic security constraints
+    allowedResources  []string
+    allowedVerbs      []string  
+    allowedNamespaces []string
+    maxConcurrentOps  int
 }
 
-type ResourceQuotaConfig struct {
-    MaxObjects        int
-    MaxMemoryUsage    resource.Quantity
-    MaxCPUTime        time.Duration
-    MaxExecutionTime  time.Duration
+func (rc *RestrictedClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+    // 1. Check resource allowlist
+    if !rc.isResourceAllowed(obj) {
+        return fmt.Errorf("plugin %s: resource %T not allowed", rc.pluginName, obj)
+    }
+    
+    // 2. Check verb allowlist
+    if !rc.isVerbAllowed("get") {
+        return fmt.Errorf("plugin %s: verb 'get' not allowed", rc.pluginName)
+    }
+    
+    // 3. Optional RBAC check (when enabled)
+    if rc.authorizer != nil {
+        if !rc.checkRBACPermission(ctx, "get", obj, key.Namespace) {
+            return fmt.Errorf("plugin %s: RBAC denied", rc.pluginName)
+        }
+    }
+    
+    return rc.base.Get(ctx, key, obj)
 }
 ```
+
+### Plugin Security Configuration
+
+```yaml
+# plugins/item-validator-plugin.yaml
+name: "item-validator"
+type: "wasm"
+path: "./item-validator.wasm"
+version: "v1.0.0"
+
+# Simple security config
+security:
+  allowedResources:
+    - "items"
+    - "events"
+  allowedVerbs:
+    - "get" 
+    - "list"
+    - "create" # For events only
+  allowedNamespaces:
+    - "default"
+    - "inventory"
+  maxConcurrentRequests: 10
+```
+
+### Security Layers Overview
+
+**Layer 1: WASM Sandbox (Automatic)**
+- Memory isolation via linear memory
+- Control flow integrity
+- Bounds checking
+- Capability-based host function access
+
+**Layer 2: Resource Restrictions (Simple Allowlists)**
+- Allowed resource types
+- Allowed operations (verbs)
+- Namespace scoping
+- Concurrency limits
+
+**Layer 3: RBAC Integration (Optional)**
+- Standard Kubernetes RBAC when enabled
+- Plugin-aware authorization context
+- ServiceAccount-based plugin identity
+
+**Layer 4: Monitoring & Auditing (Future)**
+- Plugin action logging
+- Anomaly detection
+- Rate limiting enforcement
 
 ## Performance Considerations
 
