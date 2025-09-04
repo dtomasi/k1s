@@ -11,7 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/cockroachdb/pebble"
+	"github.com/cockroachdb/pebble/v2"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -130,9 +130,8 @@ func (s *pebbleStorage) initDB() error {
 		MaxOpenFiles:                16384,
 
 		// Performance tuning
-		MaxConcurrentCompactions: func() int { return 3 },
-		DisableWAL:               false,   // Keep WAL for ACID guarantees
-		FlushSplitBytes:          2 << 20, // 2MB
+		DisableWAL:      false,   // Keep WAL for ACID guarantees
+		FlushSplitBytes: 2 << 20, // 2MB
 	}
 
 	db, err := pebble.Open(dbPath, opts)
@@ -687,7 +686,7 @@ func (s *pebbleStorage) Compact(ctx context.Context) error {
 	}
 
 	// Perform manual compaction on the entire keyspace
-	if err := s.db.Compact([]byte(""), []byte("\xFF"), true); err != nil {
+	if err := s.db.Compact(ctx, []byte(""), []byte("\xFF"), true); err != nil {
 		return fmt.Errorf("failed to compact database: %w", err)
 	}
 
