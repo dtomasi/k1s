@@ -874,6 +874,11 @@ func (s *pebbleStorage) GuaranteedUpdate(ctx context.Context, key string, destin
 		return k1sstorage.NewContextCancelledError(ctx)
 	}
 
+	if err := s.initDB(); err != nil {
+		atomic.AddUint64(&s.metrics.errors, 1)
+		return err
+	}
+
 	// Apply tenant/namespace prefix
 	key = s.buildKey(key)
 
