@@ -4,7 +4,7 @@
 
 # Go version detection priority (can be overridden with GO_VERSION env var):
 # 1. go.work (workspace-level version definition)
-# 2. go.mod (module-level version definition)  
+# 2. go.mod (module-level version definition)
 # 3. hermit (installed tool version)
 # 4. system go (fallback)
 export GO_VERSION := env_var_or_default("GO_VERSION", shell("
@@ -175,6 +175,9 @@ mod-tidy:
 # Download dependencies
 mod-download:
     @just _for-each-module "go mod download"
+
+generate:
+    @just _for-each-module "go generate ./..."
 
 # === Cleanup ===
 

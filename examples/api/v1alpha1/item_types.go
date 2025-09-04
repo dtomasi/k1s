@@ -18,11 +18,14 @@ type ItemSpec struct {
 	Description string `json:"description,omitempty"`
 
 	// Quantity is the number of items available
+	// +kubebuilder:validation:CEL:rule="self >= 0",message="quantity must be non-negative"
+	// +kubebuilder:validation:CEL:rule="self <= 10000",message="quantity cannot exceed 10000"
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:default=1
 	Quantity int32 `json:"quantity"`
 
 	// Price is the cost of the item in cents
+	// +kubebuilder:validation:CEL:rule="self > 0",message="price must be positive"
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	Price *int64 `json:"price,omitempty"`
