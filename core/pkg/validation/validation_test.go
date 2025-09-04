@@ -118,6 +118,11 @@ var _ = Describe("Validation Manager", func() {
 						Value: 0,
 					},
 					{
+						Field: "spec.count",
+						Type:  validation.ValidationRuleTypeMaximum,
+						Value: 1000,
+					},
+					{
 						Field: "spec.status",
 						Type:  validation.ValidationRuleTypeEnum,
 						Value: "Available;Reserved;Sold;Discontinued",
@@ -328,6 +333,12 @@ var _ = Describe("Validation Manager", func() {
 					}
 				}
 				Expect(found).To(BeTrue())
+			})
+
+			It("should skip maximum value violations (not implemented)", func() {
+				// Maximum validation is not yet implemented (0% coverage)
+				// This test documents the expected behavior but skips for now
+				Skip("Maximum validation not yet implemented")
 			})
 
 			It("should report enum violations", func() {
@@ -567,6 +578,29 @@ var _ = Describe("Validation Manager", func() {
 			value, err := fieldValidator.GetFieldValue(testObj, "spec.price")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(value).To(BeNil())
+		})
+
+		It("should test error methods", func() {
+			// Test ValidationError.Error() method
+			err := validation.ValidationError{
+				Field:   "test.field",
+				Message: "test message",
+			}
+			Expect(err.Error()).To(ContainSubstring("test.field"))
+			Expect(err.Error()).To(ContainSubstring("test message"))
+		})
+
+		It("should test validation error aggregation", func() {
+			// Test ValidationErrors.Error() method
+			errors := validation.ValidationErrors{
+				Errors: []validation.ValidationError{
+					{Field: "field1", Message: "error1"},
+					{Field: "field2", Message: "error2"},
+				},
+			}
+			Expect(errors.Error()).To(ContainSubstring("validation failed"))
+			Expect(errors.Error()).To(ContainSubstring("error1"))
+			Expect(errors.Error()).To(ContainSubstring("error2"))
 		})
 	})
 
