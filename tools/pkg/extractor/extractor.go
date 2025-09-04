@@ -56,7 +56,7 @@ func NewExtractor() *Extractor {
 
 // Extract processes Go source files and extracts kubebuilder markers
 func (e *Extractor) Extract(paths []string) ([]*ResourceInfo, error) {
-	var resources []*ResourceInfo
+	resources := make([]*ResourceInfo, 0)
 	var groupInfo *PackageInfo
 
 	for _, path := range paths {
