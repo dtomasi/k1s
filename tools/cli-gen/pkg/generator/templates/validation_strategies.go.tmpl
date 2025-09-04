@@ -16,8 +16,8 @@ import (
 	"google.golang.org/protobuf/proto"
 	exprpb "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
 	"k8s.io/apimachinery/pkg/runtime"
-	
-	"github.com/dtomasi/k1s/core/pkg/validation"
+
+	"github.com/dtomasi/k1s/core/validation"
 )
 
 {{- if .CompiledCELExpressions }}
@@ -41,7 +41,7 @@ func init() {
 	if err != nil {
 		panic(fmt.Sprintf("failed to create CEL environment: %v", err))
 	}
-	
+
 	// Deserialize pre-compiled CEL expressions
 {{- range .CompiledCELExpressions }}
 	{
@@ -97,18 +97,18 @@ var _ validation.ValidationStrategy = (*{{ .Kind }}ValidationStrategy)(nil)
 {{- range .Resources }}
 {{- if .Validations }}
 
-// {{ .Kind }}ValidationStrategy validates {{ .Kind }} objects  
+// {{ .Kind }}ValidationStrategy validates {{ .Kind }} objects
 type {{ .Kind }}ValidationStrategy struct{}
 
 func (s *{{ .Kind }}ValidationStrategy) Execute(ctx context.Context, obj runtime.Object) []validation.ValidationError {
 	var errors []validation.ValidationError
-	
+
 	// Use reflection to access the object fields
 	val := reflect.ValueOf(obj)
 	if val.Kind() == reflect.Ptr {
 		val = val.Elem()
 	}
-	
+
 	if val.Kind() != reflect.Struct {
 		return []validation.ValidationError{
 			{
@@ -117,16 +117,16 @@ func (s *{{ .Kind }}ValidationStrategy) Execute(ctx context.Context, obj runtime
 			},
 		}
 	}
-	
+
 	typ := val.Type()
-	
+
 	{{- range $fieldName, $validations := .Validations }}
 	// Validate field: {{ $fieldName }}
 	{
 		var fieldValue reflect.Value
 		var fieldInterface interface{}
 		var found bool
-		
+
 		// Try to find field in Spec substruct first (since that's where business logic fields are)
 		if specField := val.FieldByName("Spec"); specField.IsValid() && specField.Kind() == reflect.Struct {
 			if _, specFoundField := specField.Type().FieldByName("{{ $fieldName }}"); specFoundField {
@@ -150,10 +150,10 @@ func (s *{{ .Kind }}ValidationStrategy) Execute(ctx context.Context, obj runtime
 				found = true
 			}
 		}
-		
+
 		if found && fieldValue.IsValid() && fieldValue.CanInterface() {
 			fieldInterface = fieldValue.Interface()
-			
+
 			{{- range $validations }}
 			{{- if eq .Type "CEL" }}
 			// Pre-compiled CEL validation: {{ .Rule }}
@@ -229,7 +229,7 @@ func (s *{{ .Kind }}ValidationStrategy) Execute(ctx context.Context, obj runtime
 				}
 			}
 			{{- else if eq .Type "Maximum" }}
-			// Maximum validation  
+			// Maximum validation
 			if num := getNumericValue(fieldInterface); num != nil {
 				if *num > {{ .Value }} {
 					errors = append(errors, validation.ValidationError{
@@ -272,7 +272,7 @@ func (s *{{ .Kind }}ValidationStrategy) Execute(ctx context.Context, obj runtime
 		}
 	}
 	{{- end }}
-	
+
 	return errors
 }
 
@@ -297,7 +297,7 @@ func isFieldEmpty(value interface{}) bool {
 	if value == nil {
 		return true
 	}
-	
+
 	v := reflect.ValueOf(value)
 	switch v.Kind() {
 	case reflect.String:
@@ -327,9 +327,9 @@ func getNumericValue(value interface{}) *float64 {
 	if value == nil {
 		return nil
 	}
-	
+
 	v := reflect.ValueOf(value)
-	
+
 	// Handle pointers by dereferencing them
 	if v.Kind() == reflect.Ptr {
 		if v.IsNil() {
@@ -337,9 +337,9 @@ func getNumericValue(value interface{}) *float64 {
 		}
 		v = v.Elem()
 	}
-	
+
 	var result float64
-	
+
 	switch v.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		result = float64(v.Int())
@@ -357,7 +357,7 @@ func getNumericValue(value interface{}) *float64 {
 	default:
 		return nil
 	}
-	
+
 	return &result
 }
 
