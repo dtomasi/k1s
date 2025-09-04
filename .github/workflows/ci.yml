@@ -57,7 +57,7 @@ jobs:
             exit 1
           fi
 
-  # Comprehensive linting with golangci-lint
+  # Comprehensive linting using just lint
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -90,30 +90,8 @@ jobs:
     - name: Download dependencies
       run: go work sync
 
-    - name: Run golangci-lint - Core
-      run: |
-        cd core
-        golangci-lint run --timeout=10m --config=../.golangci.yml
-
-    - name: Run golangci-lint - Memory Storage
-      run: |
-        cd storage/memory
-        golangci-lint run --timeout=10m --config=../../.golangci.yml
-
-    - name: Run golangci-lint - Pebble Storage
-      run: |
-        cd storage/pebble
-        golangci-lint run --timeout=10m --config=../../.golangci.yml
-
-    - name: Run golangci-lint - Tools
-      run: |
-        cd tools
-        golangci-lint run --timeout=10m --config=../.golangci.yml
-
-    - name: Run golangci-lint - Examples
-      run: |
-        cd examples
-        golangci-lint run --timeout=10m --config=../.golangci.yml
+    - name: Run linting with just
+      run: just lint
 
   # Testing - Ubuntu only for now 
   test:
@@ -159,9 +137,9 @@ jobs:
         run: go test -race -coverprofile=coverage-pebble.out -covermode=atomic ./...
         working-directory: storage/pebble
 
-      - name: Run tests - Tools
-        run: go test -race -coverprofile=coverage-tools.out -covermode=atomic ./...
-        working-directory: tools
+      - name: Run tests - CLI-Gen Tool
+        run: go test -race -coverprofile=coverage-cli-gen.out -covermode=atomic ./...
+        working-directory: tools/cli-gen
 
       - name: Run tests - Examples
         run: go test -race -coverprofile=coverage-examples.out -covermode=atomic ./...
@@ -171,7 +149,7 @@ jobs:
         uses: codecov/codecov-action@v5
         if: env.CODECOV_TOKEN != ''
         with:
-          files: ./core/coverage.out,./storage/memory/coverage-memory.out,./storage/pebble/coverage-pebble.out,./tools/coverage-tools.out,./examples/coverage-examples.out
+          files: ./core/coverage.out,./storage/memory/coverage-memory.out,./storage/pebble/coverage-pebble.out,./tools/cli-gen/coverage-cli-gen.out,./examples/coverage-examples.out
           fail_ci_if_error: false
           verbose: true
         continue-on-error: true
@@ -303,9 +281,9 @@ jobs:
       run: go build ./...
       working-directory: storage/pebble
 
-    - name: Build - Tools
+    - name: Build - CLI-Gen Tool
       run: go build ./...
-      working-directory: tools
+      working-directory: tools/cli-gen
 
     - name: Build - Examples
       run: go build ./...
@@ -314,11 +292,11 @@ jobs:
     - name: Build CLI tools
       run: |
         # Build cli-gen tool
-        cd tools
-        go build -o ../bin/cli-gen ./cmd/cli-gen
+        cd tools/cli-gen
+        go build -o ../../bin/cli-gen ./cmd
         
         # Build k1s-demo (if main.go exists)
-        cd ../examples
+        cd ../../examples
         if [ -f cmd/k1s-demo/main.go ]; then
           go build -o ../bin/k1s-demo ./cmd/k1s-demo
         fi
