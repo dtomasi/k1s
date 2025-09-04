@@ -12,9 +12,11 @@ import (
 	"sync/atomic"
 
 	"github.com/cockroachdb/pebble"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/apiserver/pkg/storage"
 
@@ -178,7 +180,9 @@ func (s *pebbleStorage) Create(ctx context.Context, key string, obj, out runtime
 			log.Printf("Warning: %s closer: %v", errFailedToClose, err)
 		}
 		atomic.AddUint64(&s.metrics.errors, 1)
-		return fmt.Errorf("key already exists: %s", key)
+		// Use Kubernetes standard error type for already exists
+		gr := schema.GroupResource{Resource: "objects"} // Generic resource for storage
+		return apierrors.NewAlreadyExists(gr, key)
 	} else if err != pebble.ErrNotFound {
 		atomic.AddUint64(&s.metrics.errors, 1)
 		return fmt.Errorf("failed to check key existence: %w", err)
@@ -287,7 +291,9 @@ func (s *pebbleStorage) Delete(ctx context.Context, key string, out runtime.Obje
 		data, closer, err := s.db.Get([]byte(key))
 		if err == pebble.ErrNotFound {
 			atomic.AddUint64(&s.metrics.errors, 1)
-			return fmt.Errorf(errKeyNotFound+": %s", key)
+			// Use Kubernetes standard error type for not found
+			gr := schema.GroupResource{Resource: "objects"} // Generic resource for storage
+			return apierrors.NewNotFound(gr, key)
 		} else if err != nil {
 			atomic.AddUint64(&s.metrics.errors, 1)
 			return fmt.Errorf("failed to get existing object: %w", err)
@@ -399,7 +405,9 @@ func (s *pebbleStorage) Get(ctx context.Context, key string, opts storage.GetOpt
 		if opts.IgnoreNotFound {
 			return nil
 		}
-		return fmt.Errorf(errKeyNotFound+": %s", key)
+		// Use Kubernetes standard error type for not found
+		gr := schema.GroupResource{Resource: "objects"} // Generic resource for storage
+		return apierrors.NewNotFound(gr, key)
 	} else if err != nil {
 		atomic.AddUint64(&s.metrics.errors, 1)
 		return fmt.Errorf("failed to get key: %w", err)
@@ -621,10 +629,14 @@ func (s *pebbleStorage) Watch(ctx context.Context, key string, opts storage.List
 				}
 
 				if matches {
+					// Create a proper object from stored data
 					obj := &runtime.Unknown{}
-					if json.Unmarshal(iter.Value(), obj) == nil {
-						w.Send(watch.Added, obj)
+					if err := json.Unmarshal(iter.Value(), obj); err != nil {
+						// Log error but continue with other objects
+						log.Printf("Warning: failed to unmarshal object for watch event: %v", err)
+						continue
 					}
+					w.Send(watch.Added, obj)
 				}
 			}
 		}
@@ -855,6 +867,142 @@ func (s *pebbleStorage) removeWatcher(key string, watcher *k1sstorage.SimpleWatc
 }
 
 // GetMetrics returns current performance metrics
+// GuaranteedUpdate implements storage.Interface
+func (s *pebbleStorage) GuaranteedUpdate(ctx context.Context, key string, destination runtime.Object, ignoreNotFound bool,
+	preconditions *storage.Preconditions, tryUpdate storage.UpdateFunc, cachedExistingObject runtime.Object) error {
+	if ctx.Err() != nil {
+		return k1sstorage.NewContextCancelledError(ctx)
+	}
+
+	if err := s.initDB(); err != nil {
+		atomic.AddUint64(&s.metrics.errors, 1)
+		return err
+	}
+
+	// Apply tenant/namespace prefix
+	key = s.buildKey(key)
+
+	// Get current object
+	value, closer, err := s.db.Get([]byte(key))
+	var current runtime.Object
+	exists := true
+
+	if err != nil {
+		if err == pebble.ErrNotFound {
+			exists = false
+			if !ignoreNotFound {
+				atomic.AddUint64(&s.metrics.errors, 1)
+				// Use Kubernetes standard error type for not found
+				gr := schema.GroupResource{Resource: "objects"} // Generic resource for storage
+				return apierrors.NewNotFound(gr, key)
+			}
+			current = destination.DeepCopyObject()
+		} else {
+			atomic.AddUint64(&s.metrics.errors, 1)
+			return fmt.Errorf("failed to get current object: %w", err)
+		}
+	} else {
+		current = destination.DeepCopyObject()
+		if err := json.Unmarshal(value, current); err != nil {
+			if err := closer.Close(); err != nil {
+				log.Printf("Warning: %s closer: %v", errFailedToClose, err)
+			}
+			atomic.AddUint64(&s.metrics.errors, 1)
+			return fmt.Errorf("failed to deserialize current object: %w", err)
+		}
+		if err := closer.Close(); err != nil {
+			log.Printf("Warning: %s closer: %v", errFailedToClose, err)
+		}
+	}
+
+	// Check preconditions if provided
+	if preconditions != nil {
+		if err := s.checkPreconditions(current, preconditions); err != nil {
+			atomic.AddUint64(&s.metrics.errors, 1)
+			return err
+		}
+	}
+
+	// Try the update
+	updated, ttl, err := tryUpdate(current, storage.ResponseMeta{})
+	if err != nil {
+		atomic.AddUint64(&s.metrics.errors, 1)
+		return err
+	}
+
+	// Generate new resource version
+	resourceVersion := atomic.AddUint64(&s.currentResourceVersion, 1)
+	if err := s.versioner.UpdateObject(updated, resourceVersion); err != nil {
+		atomic.AddUint64(&s.metrics.errors, 1)
+		return fmt.Errorf("failed to update resource version: %w", err)
+	}
+
+	// Serialize updated object
+	updatedData, err := json.Marshal(updated)
+	if err != nil {
+		atomic.AddUint64(&s.metrics.errors, 1)
+		return fmt.Errorf("failed to serialize updated object: %w", err)
+	}
+
+	// Store in PebbleDB with atomic transaction
+	batch := s.db.NewBatch()
+	if err := batch.Set([]byte(key), updatedData, pebble.Sync); err != nil {
+		if err := batch.Close(); err != nil {
+			log.Printf("Warning: %s batch: %v", errFailedToClose, err)
+		}
+		atomic.AddUint64(&s.metrics.errors, 1)
+		return fmt.Errorf("failed to set key in batch: %w", err)
+	}
+
+	// Store resource version mapping
+	versionKey := key + errVersionSuffix
+	versionData := fmt.Sprintf("%d", resourceVersion)
+	if err := batch.Set([]byte(versionKey), []byte(versionData), pebble.Sync); err != nil {
+		if err := batch.Close(); err != nil {
+			log.Printf("Warning: %s batch: %v", errFailedToClose, err)
+		}
+		atomic.AddUint64(&s.metrics.errors, 1)
+		return fmt.Errorf("failed to set version key in batch: %w", err)
+	}
+
+	// Commit the transaction
+	if err := batch.Commit(pebble.Sync); err != nil {
+		atomic.AddUint64(&s.metrics.errors, 1)
+		return fmt.Errorf("failed to commit batch: %w", err)
+	}
+
+	// Copy to destination
+	if err := json.Unmarshal(updatedData, destination); err != nil {
+		atomic.AddUint64(&s.metrics.errors, 1)
+		return fmt.Errorf("failed to copy to destination: %w", err)
+	}
+
+	// Notify watchers
+	eventType := watch.Modified
+	if !exists {
+		eventType = watch.Added
+	}
+	s.notifyWatchers(key, eventType, updated)
+
+	atomic.AddUint64(&s.metrics.operations, 1)
+	_ = ttl // TTL not implemented in pebble storage
+	return nil
+}
+
+// RequestWatchProgress implements storage.Interface
+func (s *pebbleStorage) RequestWatchProgress(ctx context.Context) error {
+	// PebbleDB storage doesn't need to implement watch progress tracking
+	// since it provides consistent reads and immediate writes
+	return nil
+}
+
+// RequestProgress implements storage.Interface
+func (s *pebbleStorage) RequestProgress(ctx context.Context) error {
+	// PebbleDB storage doesn't need progress requests since all operations
+	// are atomic with consistent visibility
+	return nil
+}
+
 func (s *pebbleStorage) GetMetrics() (operations, errors, watchers uint64) {
 	return atomic.LoadUint64(&s.metrics.operations),
 		atomic.LoadUint64(&s.metrics.errors),

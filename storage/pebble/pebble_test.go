@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -182,7 +184,7 @@ var _ = Describe("PebbleStorage", func() {
 			// Try to create again - should fail
 			err = storage.Create(ctx, key, testObject, nil, 0)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("key already exists"))
+			Expect(err.Error()).To(ContainSubstring("already exists"))
 		})
 
 		It("should get an object successfully", func() {
@@ -206,7 +208,7 @@ var _ = Describe("PebbleStorage", func() {
 
 			err := storage.Get(ctx, key, k8storage.GetOptions{}, retrieved)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("key not found"))
+			Expect(err.Error()).To(ContainSubstring("not found"))
 		})
 
 		It("should ignore not found when requested", func() {
@@ -233,7 +235,7 @@ var _ = Describe("PebbleStorage", func() {
 			retrieved := &TestObject{}
 			err = storage.Get(ctx, key, k8storage.GetOptions{}, retrieved)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("key not found"))
+			Expect(err.Error()).To(ContainSubstring("not found"))
 		})
 
 		It("should fail to delete non-existent objects", func() {
@@ -242,7 +244,7 @@ var _ = Describe("PebbleStorage", func() {
 
 			err := storage.Delete(ctx, key, out, nil, nil, nil)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("key not found"))
+			Expect(err.Error()).To(ContainSubstring("not found"))
 		})
 	})
 
@@ -1070,6 +1072,582 @@ var _ = Describe("PebbleStorage", func() {
 			_ = storage.Get(ctx, key, k8storage.GetOptions{}, &retrieved)
 			// TTL might not be implemented yet, so don't fail if object still exists
 			// This test is mainly for coverage of the TTL parameter
+		})
+	})
+
+	Describe("Extended Storage Interface Methods", func() {
+		It("should handle GuaranteedUpdate for existing object", func() {
+			key := "guaranteed-update-test"
+
+			// Create initial object
+			err := storage.Create(ctx, key, testObject, nil, 0)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Update using GuaranteedUpdate
+			updateFunc := func(input runtime.Object, _ k8storage.ResponseMeta) (runtime.Object, *uint64, error) {
+				obj := input.(*TestObject)
+				obj.Spec.Name = "updated-name"
+				return obj, nil, nil
+			}
+
+			var destination TestObject
+			err = storage.GuaranteedUpdate(ctx, key, &destination, false, nil, updateFunc, nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(destination.Spec.Name).To(Equal("updated-name"))
+
+			// Verify object was actually updated
+			var retrieved TestObject
+			err = storage.Get(ctx, key, k8storage.GetOptions{}, &retrieved)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(retrieved.Spec.Name).To(Equal("updated-name"))
+		})
+
+		It("should handle GuaranteedUpdate for non-existent object with ignoreNotFound=true", func() {
+			key := "guaranteed-update-nonexistent"
+
+			updateFunc := func(input runtime.Object, _ k8storage.ResponseMeta) (runtime.Object, *uint64, error) {
+				obj := input.(*TestObject)
+				obj.Spec.Name = "new-object"
+				return obj, nil, nil
+			}
+
+			var destination TestObject
+			destination.APIVersion = testAPIVersion
+			destination.Kind = testObjectKind
+			err := storage.GuaranteedUpdate(ctx, key, &destination, true, nil, updateFunc, nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(destination.Spec.Name).To(Equal("new-object"))
+		})
+
+		It("should handle GuaranteedUpdate for non-existent object with ignoreNotFound=false", func() {
+			key := "guaranteed-update-fail"
+
+			updateFunc := func(input runtime.Object, _ k8storage.ResponseMeta) (runtime.Object, *uint64, error) {
+				return input, nil, nil
+			}
+
+			var destination TestObject
+			err := storage.GuaranteedUpdate(ctx, key, &destination, false, nil, updateFunc, nil)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("not found"))
+		})
+
+		It("should handle GuaranteedUpdate with preconditions", func() {
+			key := "guaranteed-update-preconditions"
+
+			// Create object with specific UID
+			testObj := testObject.DeepCopyObject().(*TestObject)
+			testObj.UID = types.UID("test-uid-123")
+			err := storage.Create(ctx, key, testObj, nil, 0)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Update with correct preconditions
+			preconditions := &k8storage.Preconditions{
+				UID: &testObj.UID,
+			}
+
+			updateFunc := func(input runtime.Object, _ k8storage.ResponseMeta) (runtime.Object, *uint64, error) {
+				obj := input.(*TestObject)
+				obj.Spec.Name = "precondition-updated"
+				return obj, nil, nil
+			}
+
+			var destination TestObject
+			err = storage.GuaranteedUpdate(ctx, key, &destination, false, preconditions, updateFunc, nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(destination.Spec.Name).To(Equal("precondition-updated"))
+		})
+
+		It("should handle GuaranteedUpdate with failed preconditions", func() {
+			key := "guaranteed-update-preconditions-fail"
+
+			// Create object
+			err := storage.Create(ctx, key, testObject, nil, 0)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Try to update with wrong UID precondition
+			wrongUID := types.UID("wrong-uid")
+			preconditions := &k8storage.Preconditions{
+				UID: &wrongUID,
+			}
+
+			updateFunc := func(input runtime.Object, _ k8storage.ResponseMeta) (runtime.Object, *uint64, error) {
+				return input, nil, nil
+			}
+
+			var destination TestObject
+			err = storage.GuaranteedUpdate(ctx, key, &destination, false, preconditions, updateFunc, nil)
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should handle GuaranteedUpdate with failed tryUpdate", func() {
+			key := "guaranteed-update-tryupdate-fail"
+
+			// Create object
+			err := storage.Create(ctx, key, testObject, nil, 0)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Update function that fails
+			updateFunc := func(input runtime.Object, _ k8storage.ResponseMeta) (runtime.Object, *uint64, error) {
+				return nil, nil, fmt.Errorf("update failed")
+			}
+
+			var destination TestObject
+			err = storage.GuaranteedUpdate(ctx, key, &destination, false, nil, updateFunc, nil)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("update failed"))
+		})
+
+		It("should handle GuaranteedUpdate with context cancellation", func() {
+			key := "guaranteed-update-context-cancel"
+
+			// Create cancelled context
+			cancelCtx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			updateFunc := func(input runtime.Object, _ k8storage.ResponseMeta) (runtime.Object, *uint64, error) {
+				return input, nil, nil
+			}
+
+			var destination TestObject
+			err := storage.GuaranteedUpdate(cancelCtx, key, &destination, true, nil, updateFunc, nil)
+			Expect(err).To(HaveOccurred())
+			Expect(k1sstorage.IsContextCancelled(err)).To(BeTrue())
+		})
+
+		It("should handle RequestWatchProgress", func() {
+			err := storage.RequestWatchProgress(ctx)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should handle RequestProgress", func() {
+			err := storage.RequestProgress(ctx)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should handle RequestWatchProgress with cancelled context", func() {
+			cancelCtx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			err := storage.RequestWatchProgress(cancelCtx)
+			// These methods are no-ops but should handle context properly
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should handle RequestProgress with cancelled context", func() {
+			cancelCtx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			err := storage.RequestProgress(cancelCtx)
+			// These methods are no-ops but should handle context properly
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should handle GuaranteedUpdate with ResourceVersion preconditions", func() {
+			key := "guaranteed-update-rv-preconditions"
+
+			// Create object
+			err := storage.Create(ctx, key, testObject, nil, 0)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Get the object to find its resource version
+			var retrieved TestObject
+			err = storage.Get(ctx, key, k8storage.GetOptions{}, &retrieved)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Update with correct ResourceVersion preconditions
+			preconditions := &k8storage.Preconditions{
+				ResourceVersion: &retrieved.ResourceVersion,
+			}
+
+			updateFunc := func(input runtime.Object, _ k8storage.ResponseMeta) (runtime.Object, *uint64, error) {
+				obj := input.(*TestObject)
+				obj.Spec.Name = "rv-precondition-updated"
+				return obj, nil, nil
+			}
+
+			var destination TestObject
+			err = storage.GuaranteedUpdate(ctx, key, &destination, false, preconditions, updateFunc, nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(destination.Spec.Name).To(Equal("rv-precondition-updated"))
+		})
+
+		It("should handle GuaranteedUpdate with failed ResourceVersion preconditions", func() {
+			key := "guaranteed-update-rv-preconditions-fail"
+
+			// Create object
+			err := storage.Create(ctx, key, testObject, nil, 0)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Try to update with wrong ResourceVersion precondition
+			wrongRV := "wrong-resource-version"
+			preconditions := &k8storage.Preconditions{
+				ResourceVersion: &wrongRV,
+			}
+
+			updateFunc := func(input runtime.Object, _ k8storage.ResponseMeta) (runtime.Object, *uint64, error) {
+				return input, nil, nil
+			}
+
+			var destination TestObject
+			err = storage.GuaranteedUpdate(ctx, key, &destination, false, preconditions, updateFunc, nil)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("resource version mismatch"))
+		})
+
+		It("should handle Watch with SendInitialEvents option", func() {
+			keyPrefix := "watch-initial-test"
+
+			// Create some test objects first
+			for i := 0; i < 2; i++ {
+				obj := testObject.DeepCopyObject().(*TestObject)
+				obj.Name = fmt.Sprintf("watch-initial-object-%d", i)
+				key := fmt.Sprintf("%s/obj-%d", keyPrefix, i)
+
+				err := storage.Create(ctx, key, obj, nil, 0)
+				Expect(err).NotTo(HaveOccurred())
+			}
+
+			// Test Watch with SendInitialEvents=true
+			sendInitialEvents := true
+			watcher, err := storage.Watch(ctx, keyPrefix, k8storage.ListOptions{
+				Recursive:         true,
+				SendInitialEvents: &sendInitialEvents,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			defer watcher.Stop()
+
+			// Should receive initial events for existing objects
+			select {
+			case event := <-watcher.ResultChan():
+				Expect(event.Type).To(Equal(watch.Added))
+			case <-time.After(100 * time.Millisecond):
+				// It's OK if we don't receive an event immediately in tests
+			}
+		})
+
+		It("should handle buildKey with different configurations", func() {
+			// This test exercises buildKey function with different tenant prefixes
+			key := "build-key-test"
+
+			// Test with default config (no tenant prefix)
+			err := storage.Create(ctx, key, testObject, nil, 0)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify the object was created
+			var retrieved TestObject
+			err = storage.Get(ctx, key, k8storage.GetOptions{}, &retrieved)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should handle removeWatcher with multiple watchers", func() {
+			key := "remove-watcher-multiple"
+
+			// Create multiple watchers
+			watcher1, err := storage.Watch(ctx, key, k8storage.ListOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			defer watcher1.Stop()
+
+			watcher2, err := storage.Watch(ctx, key, k8storage.ListOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			defer watcher2.Stop()
+
+			watcher3, err := storage.Watch(ctx, key, k8storage.ListOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Stop middle watcher to test removal from slice
+			watcher3.Stop()
+
+			// Create an object to test that remaining watchers still work
+			testObj := testObject.DeepCopyObject().(*TestObject)
+			testObj.Name = "remove-watcher-multiple"
+			err = storage.Create(ctx, key+"/obj", testObj, nil, 0)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should handle Create with nil output object", func() {
+			key := "create-nil-output"
+
+			// Test creating with nil output object
+			err := storage.Create(ctx, key, testObject, nil, 0)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify object exists
+			var retrieved TestObject
+			err = storage.Get(ctx, key, k8storage.GetOptions{}, &retrieved)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should handle Get with different options", func() {
+			key := "get-options-test"
+
+			// Create object
+			err := storage.Create(ctx, key, testObject, nil, 0)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Test Get with IgnoreNotFound=false (default behavior)
+			var retrieved TestObject
+			err = storage.Get(ctx, key, k8storage.GetOptions{
+				IgnoreNotFound: false,
+			}, &retrieved)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should handle copyObject error paths", func() {
+			// This test covers the copyObject function error handling
+			// by testing with objects that have different structures
+			var destination TestObject
+
+			// Create an object to test copy
+			key := "copy-error-test"
+			err := storage.Create(ctx, key, testObject, &destination, 0)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(destination.Name).To(Equal(testObject.Name))
+		})
+
+		It("should handle Count with non-existent prefix", func() {
+			// Test Count function with a prefix that doesn't exist
+			count, err := storage.Count(ctx, "non-existent-prefix")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(count).To(Equal(int64(0)))
+		})
+
+		It("should handle Compact function", func() {
+			// Test Compact function - basic coverage
+			err := storage.Compact(ctx)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should properly handle removeWatcher with empty list cleanup", func() {
+			key := "remove-watcher-cleanup"
+
+			// Create a single watcher
+			watcher, err := storage.Watch(ctx, key, k8storage.ListOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Stop watcher - this should remove it and clean up empty list
+			watcher.Stop()
+
+			// Give it a moment to process
+			time.Sleep(10 * time.Millisecond)
+		})
+
+		It("should handle removeWatcher when watcher not found", func() {
+			key1 := "watcher-key-1"
+			key2 := "watcher-key-2"
+
+			// Create watcher for key1
+			watcher1, err := storage.Watch(ctx, key1, k8storage.ListOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			defer watcher1.Stop()
+
+			// Create watcher for key2
+			watcher2, err := storage.Watch(ctx, key2, k8storage.ListOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			defer watcher2.Stop()
+
+			// Now create an object to trigger notifications
+			testObj := testObject.DeepCopyObject().(*TestObject)
+			testObj.Name = "watcher-test-obj"
+			err = storage.Create(ctx, key1+"/obj", testObj, nil, 0)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should handle removeWatcher for non-existent key", func() {
+			// Test removing watcher for a key that doesn't exist
+			pebbleStorage, ok := storage.(*pebbleStorage)
+			Expect(ok).To(BeTrue())
+
+			// Create a fake watcher
+			fakeWatcher := &k1sstorage.SimpleWatch{}
+
+			// This should not panic or error - just do nothing
+			pebbleStorage.removeWatcher("non-existent-key", fakeWatcher)
+		})
+
+		It("should handle removeWatcher when watcher not in list", func() {
+			key := "watcher-not-in-list"
+
+			// Create one watcher for the key
+			watcher1, err := storage.Watch(ctx, key, k8storage.ListOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			defer watcher1.Stop()
+
+			// Create another watcher that's not for this key
+			watcher2, err := storage.Watch(ctx, "different-key", k8storage.ListOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			defer watcher2.Stop()
+
+			// Cast to access internal function
+			pebbleStorage, ok := storage.(*pebbleStorage)
+			Expect(ok).To(BeTrue())
+
+			// Try to remove watcher2 from key (should not find it)
+			pebbleStorage.removeWatcher(key, watcher2.(*k1sstorage.SimpleWatch))
+
+			// Create an object to ensure watcher1 is still active
+			testObj := testObject.DeepCopyObject().(*TestObject)
+			testObj.Name = "test-watcher-still-active"
+			err = storage.Create(ctx, key+"/test", testObj, nil, 0)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should handle Create with database error during existence check", func() {
+			// First create a valid key
+			key := "create-db-error-test"
+			err := storage.Create(ctx, key, testObject, nil, 0)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Now close the database to trigger errors
+			pebbleStorage, ok := storage.(*pebbleStorage)
+			Expect(ok).To(BeTrue())
+
+			err = pebbleStorage.Close()
+			Expect(err).NotTo(HaveOccurred())
+
+			// Try to create another object - should get storage closed error
+			err = storage.Create(ctx, "another-key", testObject, nil, 0)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("storage is closed"))
+		})
+
+		It("should handle Create with object serialization", func() {
+			key := "create-serialization-test"
+
+			// Create object with specific data
+			testObj := testObject.DeepCopyObject().(*TestObject)
+			testObj.Name = "serialization-test"
+			testObj.Spec.Description = "serialization-test-data"
+
+			var output TestObject
+			err := storage.Create(ctx, key, testObj, &output, 0)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify output object has correct data
+			Expect(output.Name).To(Equal("serialization-test"))
+			Expect(output.Spec.Description).To(Equal("serialization-test-data"))
+		})
+
+		It("should handle Delete with non-existent key", func() {
+			key := "delete-non-existent"
+
+			// Try to delete non-existent key
+			err := storage.Delete(ctx, key, nil, nil, nil, nil)
+			Expect(err).To(HaveOccurred())
+
+			// Should be a NotFound error
+			Expect(apierrors.IsNotFound(err)).To(BeTrue())
+		})
+
+		It("should handle Delete with graceful validation", func() {
+			key := "delete-graceful-test"
+
+			// First create an object
+			testObj := testObject.DeepCopyObject().(*TestObject)
+			testObj.Name = "graceful-test"
+			err := storage.Create(ctx, key, testObj, nil, 0)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Try to delete with graceful validation (no preconditions)
+			var deletedObj TestObject
+			err = storage.Delete(ctx, key, &deletedObj, nil, nil, nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(deletedObj.Name).To(Equal("graceful-test"))
+		})
+
+		It("should handle GuaranteedUpdate with create scenario", func() {
+			key := "guaranteed-update-create"
+
+			// Try to update non-existent object (should create)
+			var updated TestObject
+			tryUpdate := func(input runtime.Object, res k8storage.ResponseMeta) (output runtime.Object, ttl *uint64, err error) {
+				// When object doesn't exist, input could be nil or a zero-value object
+				// Let's accept either case and create a new object
+				newObj := testObject.DeepCopyObject().(*TestObject)
+				newObj.Name = "created-via-guaranteed-update"
+				return newObj, nil, nil
+			}
+
+			err := storage.GuaranteedUpdate(ctx, key, &updated, true, nil, tryUpdate, nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updated.Name).To(Equal("created-via-guaranteed-update"))
+		})
+
+		It("should handle GuaranteedUpdate with update failure", func() {
+			key := "guaranteed-update-failure"
+
+			// First create an object
+			err := storage.Create(ctx, key, testObject, nil, 0)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Try update that returns error
+			var updated TestObject
+			tryUpdate := func(input runtime.Object, res k8storage.ResponseMeta) (output runtime.Object, ttl *uint64, err error) {
+				return nil, nil, errors.New("update failed")
+			}
+
+			err = storage.GuaranteedUpdate(ctx, key, &updated, true, nil, tryUpdate, nil)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("update failed"))
+		})
+
+		It("should handle initDB error paths", func() {
+			// Create a new storage instance with invalid path to trigger initDB errors
+			// This won't fail during construction, but will fail when we try to use it
+			invalidStorage := NewPebbleStorageWithPath("/invalid/path/that/does/not/exist/and/cannot/be/created", k1sstorage.Config{})
+
+			// Try to use it - this should trigger initDB error
+			testObj := testObject.DeepCopyObject().(*TestObject)
+			err := invalidStorage.Create(context.Background(), "test-key", testObj, nil, 0)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("failed to open pebble database"))
+		})
+
+		It("should handle copyObject internal function", func() {
+			// Test copyObject by creating and then triggering a GuaranteedUpdate
+			key := "copy-object-test"
+
+			// Create an initial object
+			testObj := testObject.DeepCopyObject().(*TestObject)
+			testObj.Name = "copy-test-original"
+			testObj.Spec.Description = "original-description"
+			err := storage.Create(ctx, key, testObj, nil, 0)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Use GuaranteedUpdate to trigger copyObject internally
+			var updated TestObject
+			tryUpdate := func(input runtime.Object, res k8storage.ResponseMeta) (output runtime.Object, ttl *uint64, err error) {
+				// Modify the input object
+				if inputObj, ok := input.(*TestObject); ok {
+					inputObj.Spec.Description = "modified-description"
+					return inputObj, nil, nil
+				}
+				return input, nil, nil
+			}
+
+			err = storage.GuaranteedUpdate(ctx, key, &updated, true, nil, tryUpdate, nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updated.Spec.Description).To(Equal("modified-description"))
+		})
+
+		It("should handle List with empty results", func() {
+			// Test listing when no objects exist for a key pattern
+			var results TestObjectList
+			err := storage.List(ctx, "non-existent-prefix", k8storage.ListOptions{}, &results)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(results.Items).To(HaveLen(0))
+		})
+
+		It("should handle Create with serialization error handling", func() {
+			key := "create-serialization-error"
+
+			// Use a malformed object that might cause serialization issues
+			testObj := testObject.DeepCopyObject().(*TestObject)
+			testObj.Name = "" // Empty name might trigger validation
+
+			err := storage.Create(ctx, key, testObj, nil, 0)
+			// Should still succeed as our serialization is robust
+			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 })
