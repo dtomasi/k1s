@@ -7,7 +7,7 @@
 
 //go:generate controller-gen object paths=./...
 //go:generate controller-gen crd paths=./... output:crd:dir=./../../config/crds
-
+//go:generate go run ../../../tools/cmd/cli-gen paths=./...
 package v1alpha1
 
 import (
