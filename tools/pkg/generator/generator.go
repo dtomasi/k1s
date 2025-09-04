@@ -6,6 +6,8 @@ import (
 	"embed"
 	"fmt"
 	"go/format"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,23 +42,30 @@ func (g *Generator) Generate(resources []*extractor.ResourceInfo) error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
+	// Detect package name from output directory
+	packageName, err := g.detectPackageName()
+	if err != nil {
+		// Fallback to "generated" if we can't detect the package
+		packageName = "generated"
+	}
+
 	// Generate resource metadata
-	if err := g.generateResourceMetadata(resources); err != nil {
+	if err := g.generateResourceMetadata(resources, packageName); err != nil {
 		return fmt.Errorf("failed to generate resource metadata: %w", err)
 	}
 
 	// Generate validation strategies
-	if err := g.generateValidationStrategies(resources); err != nil {
+	if err := g.generateValidationStrategies(resources, packageName); err != nil {
 		return fmt.Errorf("failed to generate validation strategies: %w", err)
 	}
 
 	// Generate print columns
-	if err := g.generatePrintColumns(resources); err != nil {
+	if err := g.generatePrintColumns(resources, packageName); err != nil {
 		return fmt.Errorf("failed to generate print columns: %w", err)
 	}
 
 	// Generate defaulting strategies
-	if err := g.generateDefaultingStrategies(resources); err != nil {
+	if err := g.generateDefaultingStrategies(resources, packageName); err != nil {
 		return fmt.Errorf("failed to generate defaulting strategies: %w", err)
 	}
 
@@ -64,30 +73,34 @@ func (g *Generator) Generate(resources []*extractor.ResourceInfo) error {
 }
 
 // generateResourceMetadata generates resource metadata lookup functions
-func (g *Generator) generateResourceMetadata(resources []*extractor.ResourceInfo) error {
+func (g *Generator) generateResourceMetadata(resources []*extractor.ResourceInfo, packageName string) error {
 	return g.executeTemplateFromFile("zz_generated.resource_metadata.go", "templates/resource_metadata.go.tmpl", map[string]interface{}{
-		"Resources": resources,
+		"Resources":   resources,
+		"PackageName": packageName,
 	})
 }
 
 // generateValidationStrategies generates validation strategy functions
-func (g *Generator) generateValidationStrategies(resources []*extractor.ResourceInfo) error {
+func (g *Generator) generateValidationStrategies(resources []*extractor.ResourceInfo, packageName string) error {
 	return g.executeTemplateFromFile("zz_generated.validation_strategies.go", "templates/validation_strategies.go.tmpl", map[string]interface{}{
-		"Resources": resources,
+		"Resources":   resources,
+		"PackageName": packageName,
 	})
 }
 
 // generatePrintColumns generates print column definitions
-func (g *Generator) generatePrintColumns(resources []*extractor.ResourceInfo) error {
+func (g *Generator) generatePrintColumns(resources []*extractor.ResourceInfo, packageName string) error {
 	return g.executeTemplateFromFile("zz_generated.print_columns.go", "templates/print_columns.go.tmpl", map[string]interface{}{
-		"Resources": resources,
+		"Resources":   resources,
+		"PackageName": packageName,
 	})
 }
 
 // generateDefaultingStrategies generates defaulting strategy functions
-func (g *Generator) generateDefaultingStrategies(resources []*extractor.ResourceInfo) error {
+func (g *Generator) generateDefaultingStrategies(resources []*extractor.ResourceInfo, packageName string) error {
 	return g.executeTemplateFromFile("zz_generated.defaulting_strategies.go", "templates/defaulting_strategies.go.tmpl", map[string]interface{}{
-		"Resources": resources,
+		"Resources":   resources,
+		"PackageName": packageName,
 	})
 }
 
@@ -147,4 +160,31 @@ func (g *Generator) executeTemplateFromFile(filename, templatePath string, data 
 
 	fmt.Printf("Generated: %s\n", outputPath)
 	return nil
+}
+
+// detectPackageName detects the Go package name from existing files in the output directory
+func (g *Generator) detectPackageName() (string, error) {
+	files, err := filepath.Glob(filepath.Join(g.outputDir, "*.go"))
+	if err != nil {
+		return "", err
+	}
+
+	fileSet := token.NewFileSet()
+	for _, file := range files {
+		// Skip generated files to avoid conflicts
+		if strings.Contains(filepath.Base(file), "zz_generated") {
+			continue
+		}
+
+		src, err := parser.ParseFile(fileSet, file, nil, parser.PackageClauseOnly)
+		if err != nil {
+			continue // Skip files that can't be parsed
+		}
+
+		if src.Name != nil {
+			return src.Name.Name, nil
+		}
+	}
+
+	return "", fmt.Errorf("could not detect package name from %s", g.outputDir)
 }

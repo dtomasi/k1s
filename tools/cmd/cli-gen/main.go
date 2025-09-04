@@ -34,7 +34,7 @@ Compatible with controller-gen syntax, it processes kubebuilder markers to gener
 - Defaulting strategy implementations
 
 Examples:
-  # Generate k1s instrumentation in generated subdirectory (default behavior)
+  # Generate k1s instrumentation in source directory (default behavior)
   cli-gen paths=./apis/v1alpha1/...
 
   # Generate k1s instrumentation for a specific API package with custom output
@@ -71,23 +71,20 @@ Examples:
 			return fmt.Errorf("no paths provided - use paths=<path1>,<path2>... or --paths flag")
 		}
 
-		// If no output directory specified, create a generated subdirectory (controller-gen pattern)
+		// If no output directory specified, use the source directory (controller-gen behavior)
 		if parsedOutputDir == "" {
 			firstPath := parsedPaths[0]
-			var baseDir string
 			// Handle ./path/... pattern
 			if strings.HasSuffix(firstPath, "/...") {
-				baseDir = strings.TrimSuffix(firstPath, "/...")
+				parsedOutputDir = strings.TrimSuffix(firstPath, "/...")
 			} else {
 				// If it's a file, use its directory; if it's a directory, use it directly
 				if stat, err := os.Stat(firstPath); err == nil && !stat.IsDir() {
-					baseDir = filepath.Dir(firstPath)
+					parsedOutputDir = filepath.Dir(firstPath)
 				} else {
-					baseDir = firstPath
+					parsedOutputDir = firstPath
 				}
 			}
-			// Create a generated subdirectory to avoid package conflicts
-			parsedOutputDir = filepath.Join(baseDir, "generated")
 		}
 
 		if verbose {
