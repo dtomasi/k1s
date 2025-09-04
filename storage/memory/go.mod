@@ -4,7 +4,7 @@ go 1.25.1
 
 require (
 	github.com/dtomasi/k1s/core v0.0.0
-	github.com/onsi/ginkgo/v2 v2.25.2
+	github.com/onsi/ginkgo/v2 v2.25.3
 	github.com/onsi/gomega v1.38.2
 	k8s.io/apimachinery v0.34.0
 	k8s.io/apiserver v0.34.0
