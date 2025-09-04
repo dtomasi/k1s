@@ -5,16 +5,16 @@
 package v1alpha1
 
 import (
+	"context"
 	"reflect"
+
+	"k8s.io/apimachinery/pkg/runtime"
+
+	"github.com/dtomasi/k1s/core/pkg/defaulting"
 )
 
-// DefaultingStrategy applies default values to a resource object
-type DefaultingStrategy interface {
-	ApplyDefaults(obj interface{}) error
-}
-
 // GetDefaultingStrategy returns the defaulting strategy for a given kind
-func GetDefaultingStrategy(kind string) DefaultingStrategy {
+func GetDefaultingStrategy(kind string) defaulting.DefaultingStrategy {
 	strategy, ok := defaultingStrategies[kind]
 	if !ok {
 		return &NoOpDefaultingStrategy{}
@@ -25,11 +25,141 @@ func GetDefaultingStrategy(kind string) DefaultingStrategy {
 // NoOpDefaultingStrategy is a no-op defaulting strategy
 type NoOpDefaultingStrategy struct{}
 
-func (s *NoOpDefaultingStrategy) ApplyDefaults(obj interface{}) error {
+func (s *NoOpDefaultingStrategy) Apply(ctx context.Context, obj runtime.Object) error {
 	return nil
 }
 
-var defaultingStrategies = map[string]DefaultingStrategy{}
+func (s *NoOpDefaultingStrategy) SupportsType(obj runtime.Object) bool {
+	return true
+}
+
+var defaultingStrategies = map[string]defaulting.DefaultingStrategy{
+	"Category": &CategoryDefaultingStrategy{},
+	"Item":     &ItemDefaultingStrategy{},
+}
+
+// Compile-time interface assertions
+var _ defaulting.DefaultingStrategy = (*CategoryDefaultingStrategy)(nil)
+var _ defaulting.DefaultingStrategy = (*ItemDefaultingStrategy)(nil)
+
+// CategoryDefaultingStrategy applies defaults to Category objects
+type CategoryDefaultingStrategy struct{}
+
+func (s *CategoryDefaultingStrategy) Apply(ctx context.Context, obj runtime.Object) error {
+	rv := reflect.ValueOf(obj)
+	if rv.Kind() == reflect.Ptr {
+		rv = rv.Elem()
+	}
+
+	if rv.Kind() != reflect.Struct {
+		return nil // Skip non-struct objects
+	}
+
+	// Apply defaults to Spec field if it exists
+	specField := rv.FieldByName("Spec")
+	if specField.IsValid() && specField.Kind() == reflect.Struct && specField.CanSet() {
+		s.applySpecDefaults(specField)
+	}
+
+	// Apply defaults to Status field if it exists
+	statusField := rv.FieldByName("Status")
+	if statusField.IsValid() && statusField.Kind() == reflect.Struct && statusField.CanSet() {
+		s.applyStatusDefaults(statusField)
+	}
+
+	return nil
+}
+
+func (s *CategoryDefaultingStrategy) applySpecDefaults(specValue reflect.Value) {
+	// Apply default for ItemCount
+	if field := specValue.FieldByName("ItemCount"); field.IsValid() && field.CanSet() {
+		if isZeroValue(field) {
+			// String field
+			field.SetString("0")
+		}
+	}
+	// Apply default for SubCategoryCount
+	if field := specValue.FieldByName("SubCategoryCount"); field.IsValid() && field.CanSet() {
+		if isZeroValue(field) {
+			// String field
+			field.SetString("0")
+		}
+	}
+}
+
+func (s *CategoryDefaultingStrategy) applyStatusDefaults(statusValue reflect.Value) {
+}
+
+func (s *CategoryDefaultingStrategy) SupportsType(obj runtime.Object) bool {
+	// Check if object is of the correct type by examining its ObjectKind
+	if objectKind := obj.GetObjectKind(); objectKind != nil {
+		gvk := objectKind.GroupVersionKind()
+		if gvk.Kind == "Category" {
+			return true
+		}
+	}
+	// Fallback: check by type reflection
+	return reflect.TypeOf(obj).String() == "*v1alpha1.Category"
+}
+
+// ItemDefaultingStrategy applies defaults to Item objects
+type ItemDefaultingStrategy struct{}
+
+func (s *ItemDefaultingStrategy) Apply(ctx context.Context, obj runtime.Object) error {
+	rv := reflect.ValueOf(obj)
+	if rv.Kind() == reflect.Ptr {
+		rv = rv.Elem()
+	}
+
+	if rv.Kind() != reflect.Struct {
+		return nil // Skip non-struct objects
+	}
+
+	// Apply defaults to Spec field if it exists
+	specField := rv.FieldByName("Spec")
+	if specField.IsValid() && specField.Kind() == reflect.Struct && specField.CanSet() {
+		s.applySpecDefaults(specField)
+	}
+
+	// Apply defaults to Status field if it exists
+	statusField := rv.FieldByName("Status")
+	if statusField.IsValid() && statusField.Kind() == reflect.Struct && statusField.CanSet() {
+		s.applyStatusDefaults(statusField)
+	}
+
+	return nil
+}
+
+func (s *ItemDefaultingStrategy) applySpecDefaults(specValue reflect.Value) {
+	// Apply default for Quantity
+	if field := specValue.FieldByName("Quantity"); field.IsValid() && field.CanSet() {
+		if isZeroValue(field) {
+			// Integer field
+			field.SetInt(1)
+		}
+	}
+}
+
+func (s *ItemDefaultingStrategy) applyStatusDefaults(statusValue reflect.Value) {
+	// Apply default for Status
+	if field := statusValue.FieldByName("Status"); field.IsValid() && field.CanSet() {
+		if isZeroValue(field) {
+			field.SetString("Available")
+		}
+	}
+}
+
+func (s *ItemDefaultingStrategy) SupportsType(obj runtime.Object) bool {
+	// Check if object is of the correct type by examining its ObjectKind
+	if objectKind := obj.GetObjectKind(); objectKind != nil {
+		gvk := objectKind.GroupVersionKind()
+		if gvk.Kind == "Item" {
+			return true
+		}
+	}
+	// Fallback: check by type reflection
+	return reflect.TypeOf(obj).String() == "*v1alpha1.Item"
+}
 
 // Helper function to check if a value is zero
 func isZeroValue(v reflect.Value) bool {

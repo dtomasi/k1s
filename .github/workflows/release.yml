@@ -31,4 +31,31 @@ jobs:
       run-benchmarks: true
       run-security-scan: true
 
-  # TODO: Release preparation and artifact creation will be implemented later
+  # Semantic release with goreleaser
+  semantic-release:
+    name: Semantic Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # für GitHub Releases
+      packages: write   # falls Docker-Images o.ä. gebaut werden
+      id-token: write   # falls du später OIDC nutzen willst
+    needs:
+      - build-security
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch full history for semantic release
+
+      - name: Setup Hermit
+        uses: cashapp/activate-hermit@v1
+
+      - uses: go-semantic-release/action@v1
+        id: semrel
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          changelog-generator-opt: "emojis=true"
+          hooks: "goreleaser"
+          working-directory: ./tools/cli-gen
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

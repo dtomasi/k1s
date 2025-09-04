@@ -5,5 +5,5 @@ use (
 	./examples
 	./storage/memory
 	./storage/pebble
-	./tools
+	./tools/cli-gen
 )
