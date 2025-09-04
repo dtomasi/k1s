@@ -1,0 +1,77 @@
+project_name: cli-gen
+version: 2
+dist: dist/releases
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    main: ./cmd
+    binary: cli-gen
+    ldflags:
+      - -s -w
+      - -X github.com/dtomasi/k1s/tools/cli-gen/pkg/version.Version={{ .Tag }}
+      - -X github.com/dtomasi/k1s/tools/cli-gen/pkg/version.Commit={{ .Commit }}
+      - -X github.com/dtomasi/k1s/tools/cli-gen/pkg/version.Date={{ .Date }}
+      - -X github.com/dtomasi/k1s/tools/cli-gen/pkg/version.BuiltBy=goreleaser
+      - -X github.com/dtomasi/k1s/tools/cli-gen/pkg/version.Arch={{ .Arch }}
+      - -X github.com/dtomasi/k1s/tools/cli-gen/pkg/version.Os={{ .Os }}
+
+archives:
+  - name_template: >-
+      {{ .ProjectName }}-{{ .Os }}-{{ .Arch }}
+    files:
+      - none*  # include no files by default, just the binary
+
+checksum:
+  name_template: 'checksums.txt'
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - '^build:'
+      - '^chore:'
+      - 'merge conflict'
+      - Merge pull request
+      - Merge remote-tracking branch
+      - Merge branch
+
+release:
+  github:
+    owner: dtomasi
+    name: k1s
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    ## CLI-Gen Release {{ .Tag }}
+    
+    This release contains the cli-gen tool for generating k1s instrumentation from kubebuilder markers.
+  
+  footer: |
+    ## Installation
+    
+    Download the appropriate binary for your platform from the assets below.
+    
+    ### Linux/macOS
+    ```bash
+    # Download and install (replace with actual download URL)
+    curl -L https://github.com/dtomasi/k1s/releases/download/{{ .Tag }}/cli-gen-linux-amd64 -o cli-gen
+    chmod +x cli-gen
+    sudo mv cli-gen /usr/local/bin/
+    ```
+    
+    ### Verify Installation
+    ```bash
+    cli-gen version
+    ```

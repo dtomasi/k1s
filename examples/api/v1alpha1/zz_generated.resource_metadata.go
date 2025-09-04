@@ -7,18 +7,15 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	"github.com/dtomasi/k1s/core/pkg/registry"
 )
 
 // ResourceMetadata contains metadata about a resource type
 type ResourceMetadata struct {
-	Kind       string
-	Group      string
-	Version    string
-	Plural     string
-	Singular   string
-	ShortNames []string
-	Scope      string
-	HasStatus  bool
+	Group   string
+	Version string
+	Config  registry.ResourceConfig
 }
 
 // GetResourceMetadata returns metadata for a given resource kind
@@ -30,7 +27,7 @@ func GetResourceMetadata(kind string) (*ResourceMetadata, bool) {
 // GetResourceByPlural returns metadata for a resource by its plural name
 func GetResourceByPlural(plural string) (*ResourceMetadata, bool) {
 	for _, meta := range resourceMetadataMap {
-		if meta.Plural == plural {
+		if meta.Config.Plural == plural {
 			return meta, true
 		}
 	}
@@ -40,7 +37,7 @@ func GetResourceByPlural(plural string) (*ResourceMetadata, bool) {
 // GetResourceByShortName returns metadata for a resource by its short name
 func GetResourceByShortName(shortName string) (*ResourceMetadata, bool) {
 	for _, meta := range resourceMetadataMap {
-		for _, sn := range meta.ShortNames {
+		for _, sn := range meta.Config.ShortNames {
 			if sn == shortName {
 				return meta, true
 			}
@@ -60,24 +57,113 @@ func GetAllResourceMetadata() map[string]*ResourceMetadata {
 
 var resourceMetadataMap = map[string]*ResourceMetadata{
 	"Category": {
-		Kind:       "Category",
-		Group:      "examples.k1s.dtomasi.github.io",
-		Version:    "v1alpha1",
-		Plural:     "categories",
-		Singular:   "category",
-		ShortNames: []string{},
-		Scope:      "Namespaced",
-		HasStatus:  false,
+		Group:   "examples.k1s.dtomasi.github.io",
+		Version: "v1alpha1",
+		Config: registry.ResourceConfig{
+			Kind:       "Category",
+			ListKind:   "CategoryList",
+			Singular:   "category",
+			Plural:     "categories",
+			Namespaced: true,
+			ShortNames: []string{"cat"},
+			PrintColumns: []metav1.TableColumnDefinition{
+				{
+					Name:        "Category Name",
+					Type:        "string",
+					Format:      "",
+					Description: "",
+					Priority:    int32(0),
+				},
+				{
+					Name:        "Items",
+					Type:        "integer",
+					Format:      "",
+					Description: "",
+					Priority:    int32(0),
+				},
+				{
+					Name:        "Subcategories",
+					Type:        "integer",
+					Format:      "",
+					Description: "",
+					Priority:    int32(0),
+				},
+				{
+					Name:        "Parent",
+					Type:        "string",
+					Format:      "",
+					Description: "",
+					Priority:    int32(0),
+				},
+				{
+					Name:        "Age",
+					Type:        "date",
+					Format:      "",
+					Description: "",
+					Priority:    int32(0),
+				},
+			},
+			Categories:  []string{}, // Categories can be added later if needed
+			Description: "Category resource",
+		},
 	},
 	"Item": {
-		Kind:       "Item",
-		Group:      "examples.k1s.dtomasi.github.io",
-		Version:    "v1alpha1",
-		Plural:     "items",
-		Singular:   "item",
-		ShortNames: []string{},
-		Scope:      "Namespaced",
-		HasStatus:  false,
+		Group:   "examples.k1s.dtomasi.github.io",
+		Version: "v1alpha1",
+		Config: registry.ResourceConfig{
+			Kind:       "Item",
+			ListKind:   "ItemList",
+			Singular:   "item",
+			Plural:     "items",
+			Namespaced: true,
+			ShortNames: []string{"itm"},
+			PrintColumns: []metav1.TableColumnDefinition{
+				{
+					Name:        "Item Name",
+					Type:        "string",
+					Format:      "",
+					Description: "",
+					Priority:    int32(0),
+				},
+				{
+					Name:        "Quantity",
+					Type:        "integer",
+					Format:      "",
+					Description: "",
+					Priority:    int32(0),
+				},
+				{
+					Name:        "Category",
+					Type:        "string",
+					Format:      "",
+					Description: "",
+					Priority:    int32(0),
+				},
+				{
+					Name:        "Status",
+					Type:        "string",
+					Format:      "",
+					Description: "",
+					Priority:    int32(0),
+				},
+				{
+					Name:        "Price",
+					Type:        "string",
+					Format:      "",
+					Description: "",
+					Priority:    int32(0),
+				},
+				{
+					Name:        "Age",
+					Type:        "date",
+					Format:      "",
+					Description: "",
+					Priority:    int32(0),
+				},
+			},
+			Categories:  []string{}, // Categories can be added later if needed
+			Description: "Item resource",
+		},
 	},
 }
 
@@ -91,7 +177,7 @@ func GetGroupVersionResource(kind string) (*schema.GroupVersionResource, bool) {
 	gvr := &schema.GroupVersionResource{
 		Group:    meta.Group,
 		Version:  meta.Version,
-		Resource: meta.Plural,
+		Resource: meta.Config.Plural,
 	}
 	return gvr, true
 }
@@ -106,7 +192,38 @@ func GetGroupVersionKind(kind string) (*schema.GroupVersionKind, bool) {
 	gvk := &schema.GroupVersionKind{
 		Group:   meta.Group,
 		Version: meta.Version,
-		Kind:    meta.Kind,
+		Kind:    meta.Config.Kind,
 	}
 	return gvk, true
+}
+
+// RegisterAllResources registers all generated resources with the provided registry
+func RegisterAllResources(reg registry.Registry) error {
+	// Register Category
+	{
+		meta := resourceMetadataMap["Category"]
+		gvr := schema.GroupVersionResource{
+			Group:    meta.Group,
+			Version:  meta.Version,
+			Resource: meta.Config.Plural,
+		}
+
+		if err := reg.RegisterResource(gvr, meta.Config); err != nil {
+			return err
+		}
+	}
+	// Register Item
+	{
+		meta := resourceMetadataMap["Item"]
+		gvr := schema.GroupVersionResource{
+			Group:    meta.Group,
+			Version:  meta.Version,
+			Resource: meta.Config.Plural,
+		}
+
+		if err := reg.RegisterResource(gvr, meta.Config); err != nil {
+			return err
+		}
+	}
+	return nil
 }

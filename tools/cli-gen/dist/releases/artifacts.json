@@ -1,0 +1,1 @@
+[{"name":"metadata.json","path":"dist/releases/metadata.json","internal_type":35,"type":"Metadata"},{"name":"cli-gen","path":"dist/releases/cli-gen_darwin_arm64_v8.0/cli-gen","goos":"darwin","goarch":"arm64","goarm64":"v8.0","target":"darwin_arm64_v8.0","internal_type":4,"type":"Binary","extra":{"Binary":"cli-gen","Builder":"go","Ext":"","ID":"cli-gen"}}]

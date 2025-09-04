@@ -192,17 +192,18 @@ type CELValidator interface {
 	// ValidateCEL evaluates a CEL expression against an object
 	ValidateCEL(ctx context.Context, obj runtime.Object, expression string) error
 
+	// ValidateCELValue evaluates a CEL expression against any value (for testing)
+	ValidateCELValue(ctx context.Context, value interface{}, expression string) error
+
 	// CompileCEL compiles a CEL expression for efficient reuse
-	CompileCEL(expression string) (CompiledCELExpression, error)
+	CompileCEL(expression string) (CompiledCELProgram, error)
 }
 
-// CompiledCELExpression represents a compiled CEL expression for efficient execution.
-type CompiledCELExpression interface {
-	// Evaluate executes the compiled CEL expression against an object
-	Evaluate(ctx context.Context, obj runtime.Object) (bool, error)
-
-	// String returns the original CEL expression
-	String() string
+// CompiledCELProgram represents a compiled CEL program for efficient execution.
+// This replaces CompiledCELExpression for clarity.
+type CompiledCELProgram interface {
+	// Eval executes the compiled CEL expression against a value
+	Eval(ctx context.Context, value interface{}) (bool, error)
 }
 
 // ValidationOptions provides configuration options for validation behavior.
