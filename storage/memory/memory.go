@@ -2,13 +2,17 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"sync/atomic"
 
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/apiserver/pkg/storage"
 
@@ -90,7 +94,9 @@ func (s *memoryStorage) Create(ctx context.Context, key string, obj, out runtime
 	// Check if key already exists
 	if _, exists := s.data[key]; exists {
 		atomic.AddUint64(&s.metrics.errors, 1)
-		return fmt.Errorf("key already exists: %s", key)
+		// Use Kubernetes standard error type for already exists
+		gr := schema.GroupResource{Resource: "objects"} // Generic resource for storage
+		return errors.NewAlreadyExists(gr, key)
 	}
 
 	// Prepare object for storage
@@ -106,8 +112,12 @@ func (s *memoryStorage) Create(ctx context.Context, key string, obj, out runtime
 		return fmt.Errorf("failed to update resource version: %w", err)
 	}
 
-	// Serialize object using JSON (simple fallback for now)
-	data := []byte(fmt.Sprintf("%v", obj))
+	// Serialize object using JSON for consistency with other backends
+	data, err := json.Marshal(obj)
+	if err != nil {
+		atomic.AddUint64(&s.metrics.errors, 1)
+		return fmt.Errorf("failed to serialize object: %w", err)
+	}
 
 	// Store the data
 	s.data[key] = data
@@ -144,7 +154,9 @@ func (s *memoryStorage) Delete(ctx context.Context, key string, out runtime.Obje
 	_, exists := s.data[key]
 	if !exists {
 		atomic.AddUint64(&s.metrics.errors, 1)
-		return fmt.Errorf("key not found: %s", key)
+		// Use Kubernetes standard error type for not found
+		gr := schema.GroupResource{Resource: "objects"} // Generic resource for storage
+		return errors.NewNotFound(gr, key)
 	}
 
 	// Use cached object if available, otherwise create a placeholder
@@ -206,7 +218,9 @@ func (s *memoryStorage) Get(ctx context.Context, key string, opts storage.GetOpt
 		if opts.IgnoreNotFound {
 			return nil
 		}
-		return fmt.Errorf("key not found: %s", key)
+		// Use Kubernetes standard error type for not found
+		gr := schema.GroupResource{Resource: "objects"} // Generic resource for storage
+		return errors.NewNotFound(gr, key)
 	}
 
 	// Check resource version if specified
@@ -224,11 +238,12 @@ func (s *memoryStorage) Get(ctx context.Context, key string, opts storage.GetOpt
 		}
 	}
 
-	// For now, create a simple placeholder object
-	// In real implementation, this would deserialize from stored data
-	// Simple placeholder - real implementation would decode the stored data
-	// We'll skip the actual assignment to avoid interface conversion issues
-	_ = objPtr
+	// Retrieve and deserialize stored data
+	data := s.data[key]
+	if err := json.Unmarshal(data, objPtr); err != nil {
+		atomic.AddUint64(&s.metrics.errors, 1)
+		return fmt.Errorf("failed to deserialize object: %w", err)
+	}
 
 	atomic.AddUint64(&s.metrics.operations, 1)
 	return nil
@@ -320,7 +335,7 @@ func (s *memoryStorage) Watch(ctx context.Context, key string, opts storage.List
 	// Send initial events if requested
 	if opts.SendInitialEvents != nil && *opts.SendInitialEvents {
 		s.mu.RLock()
-		for storageKey := range s.data {
+		for storageKey, data := range s.data {
 			var matches bool
 			if opts.Recursive {
 				matches = strings.HasPrefix(storageKey, key)
@@ -329,7 +344,13 @@ func (s *memoryStorage) Watch(ctx context.Context, key string, opts storage.List
 			}
 
 			if matches {
+				// Create a proper object from stored data
 				obj := &runtime.Unknown{}
+				if err := json.Unmarshal(data, obj); err != nil {
+					// Log error but continue with other objects
+					log.Printf("Warning: failed to unmarshal object for watch event: %v", err)
+					continue
+				}
 				w.Send(watch.Added, obj)
 			}
 		}
@@ -491,6 +512,106 @@ func (s *memoryStorage) removeWatcher(key string, watcher *k1sstorage.SimpleWatc
 }
 
 // GetMetrics returns current performance metrics
+// GuaranteedUpdate implements storage.Interface
+func (s *memoryStorage) GuaranteedUpdate(ctx context.Context, key string, destination runtime.Object, ignoreNotFound bool,
+	preconditions *storage.Preconditions, tryUpdate storage.UpdateFunc, cachedExistingObject runtime.Object) error {
+	if ctx.Err() != nil {
+		return k1sstorage.NewContextCancelledError(ctx)
+	}
+
+	// Apply tenant/namespace prefix
+	key = s.buildKey(key)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Get current object
+	data, exists := s.data[key]
+	var current runtime.Object
+
+	if !exists {
+		if !ignoreNotFound {
+			atomic.AddUint64(&s.metrics.errors, 1)
+			// Use Kubernetes standard error type for not found
+			gr := schema.GroupResource{Resource: "objects"} // Generic resource for storage
+			return errors.NewNotFound(gr, key)
+		}
+		current = destination.DeepCopyObject()
+	} else {
+		current = destination.DeepCopyObject()
+		if err := json.Unmarshal(data, current); err != nil {
+			atomic.AddUint64(&s.metrics.errors, 1)
+			return fmt.Errorf("failed to deserialize current object: %w", err)
+		}
+	}
+
+	// Check preconditions if provided
+	if preconditions != nil {
+		if err := s.checkPreconditions(current, preconditions); err != nil {
+			atomic.AddUint64(&s.metrics.errors, 1)
+			return err
+		}
+	}
+
+	// Try the update
+	updated, ttl, err := tryUpdate(current, storage.ResponseMeta{})
+	if err != nil {
+		atomic.AddUint64(&s.metrics.errors, 1)
+		return err
+	}
+
+	// Generate new resource version
+	resourceVersion := atomic.AddUint64(&s.currentResourceVersion, 1)
+	if err := s.versioner.UpdateObject(updated, resourceVersion); err != nil {
+		atomic.AddUint64(&s.metrics.errors, 1)
+		return fmt.Errorf("failed to update resource version: %w", err)
+	}
+
+	// Serialize and store
+	updatedData, err := json.Marshal(updated)
+	if err != nil {
+		atomic.AddUint64(&s.metrics.errors, 1)
+		return fmt.Errorf("failed to serialize updated object: %w", err)
+	}
+
+	s.data[key] = updatedData
+	s.resourceVersions[key] = resourceVersion
+
+	// Copy to destination
+	if err := json.Unmarshal(updatedData, destination); err != nil {
+		atomic.AddUint64(&s.metrics.errors, 1)
+		return fmt.Errorf("failed to copy to destination: %w", err)
+	}
+
+	// Notify watchers (without holding the main lock)
+	eventType := watch.Modified
+	if !exists {
+		eventType = watch.Added
+	}
+	// Unlock before notifying watchers to avoid holding locks during callbacks
+	s.mu.Unlock()
+	s.notifyWatchers(key, eventType, updated)
+	s.mu.Lock() // Reacquire for defer unlock
+
+	atomic.AddUint64(&s.metrics.operations, 1)
+	_ = ttl // TTL not implemented in memory storage
+	return nil
+}
+
+// RequestWatchProgress implements storage.Interface
+func (s *memoryStorage) RequestWatchProgress(ctx context.Context) error {
+	// Memory storage doesn't need to implement watch progress tracking
+	// since it's always "up to date" - all operations are immediate
+	return nil
+}
+
+// RequestProgress implements storage.Interface
+func (s *memoryStorage) RequestProgress(ctx context.Context) error {
+	// Memory storage doesn't need progress requests since all operations
+	// are atomic and immediate - no eventual consistency issues
+	return nil
+}
+
 func (s *memoryStorage) GetMetrics() (operations, errors, watchers uint64) {
 	return atomic.LoadUint64(&s.metrics.operations),
 		atomic.LoadUint64(&s.metrics.errors),
