@@ -1,6 +1,7 @@
 package events_test
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -76,21 +77,17 @@ var _ = Describe("Event System", func() {
 
 	Describe("EventRecorder", func() {
 		It("should record normal events", func() {
-			recordedEvents := []*corev1.Event{}
-			sink := &mockEventSink{
-				createFunc: func(event *corev1.Event) (*corev1.Event, error) {
-					recordedEvents = append(recordedEvents, event)
-					return event, nil
-				},
-			}
-
+			sink := newMockEventSink()
 			broadcaster.StartRecordingToSink(sink)
 
 			recorder.Event(testObject, corev1.EventTypeNormal, events.ReasonCreated, "Test message")
 
-			// Give some time for async processing
-			time.Sleep(10 * time.Millisecond)
+			// Wait for async processing with Eventually
+			Eventually(func() int {
+				return sink.GetEventCount()
+			}, "100ms", "10ms").Should(Equal(1))
 
+			recordedEvents := sink.GetEvents()
 			Expect(recordedEvents).To(HaveLen(1))
 			event := recordedEvents[0]
 			Expect(event.Type).To(Equal(corev1.EventTypeNormal))
@@ -102,20 +99,16 @@ var _ = Describe("Event System", func() {
 		})
 
 		It("should record warning events", func() {
-			recordedEvents := []*corev1.Event{}
-			sink := &mockEventSink{
-				createFunc: func(event *corev1.Event) (*corev1.Event, error) {
-					recordedEvents = append(recordedEvents, event)
-					return event, nil
-				},
-			}
-
+			sink := newMockEventSink()
 			broadcaster.StartRecordingToSink(sink)
 
 			recorder.Event(testObject, corev1.EventTypeWarning, events.ReasonFailed, "Test error")
 
-			time.Sleep(10 * time.Millisecond)
+			Eventually(func() int {
+				return sink.GetEventCount()
+			}, "100ms", "10ms").Should(Equal(1))
 
+			recordedEvents := sink.GetEvents()
 			Expect(recordedEvents).To(HaveLen(1))
 			event := recordedEvents[0]
 			Expect(event.Type).To(Equal(corev1.EventTypeWarning))
@@ -124,34 +117,23 @@ var _ = Describe("Event System", func() {
 		})
 
 		It("should record formatted events", func() {
-			recordedEvents := []*corev1.Event{}
-			sink := &mockEventSink{
-				createFunc: func(event *corev1.Event) (*corev1.Event, error) {
-					recordedEvents = append(recordedEvents, event)
-					return event, nil
-				},
-			}
-
+			sink := newMockEventSink()
 			broadcaster.StartRecordingToSink(sink)
 
 			recorder.Eventf(testObject, corev1.EventTypeNormal, events.ReasonUpdated, "Updated %s with %d items", "config", 5)
 
-			time.Sleep(10 * time.Millisecond)
+			Eventually(func() int {
+				return sink.GetEventCount()
+			}, "100ms", "10ms").Should(Equal(1))
 
+			recordedEvents := sink.GetEvents()
 			Expect(recordedEvents).To(HaveLen(1))
 			event := recordedEvents[0]
 			Expect(event.Message).To(Equal("Updated config with 5 items"))
 		})
 
 		It("should record annotated events", func() {
-			recordedEvents := []*corev1.Event{}
-			sink := &mockEventSink{
-				createFunc: func(event *corev1.Event) (*corev1.Event, error) {
-					recordedEvents = append(recordedEvents, event)
-					return event, nil
-				},
-			}
-
+			sink := newMockEventSink()
 			broadcaster.StartRecordingToSink(sink)
 
 			annotations := map[string]string{
@@ -159,8 +141,11 @@ var _ = Describe("Event System", func() {
 			}
 			recorder.AnnotatedEventf(testObject, annotations, corev1.EventTypeNormal, events.ReasonStarted, "Started with annotations")
 
-			time.Sleep(10 * time.Millisecond)
+			Eventually(func() int {
+				return sink.GetEventCount()
+			}, "100ms", "10ms").Should(Equal(1))
 
+			recordedEvents := sink.GetEvents()
 			Expect(recordedEvents).To(HaveLen(1))
 			event := recordedEvents[0]
 			Expect(event.Annotations).To(HaveKeyWithValue("test-annotation", "test-value"))
@@ -169,79 +154,74 @@ var _ = Describe("Event System", func() {
 
 	Describe("EventBroadcaster", func() {
 		It("should distribute events to multiple sinks", func() {
-			recordedEvents1 := []*corev1.Event{}
-			recordedEvents2 := []*corev1.Event{}
-
-			sink1 := &mockEventSink{
-				createFunc: func(event *corev1.Event) (*corev1.Event, error) {
-					recordedEvents1 = append(recordedEvents1, event)
-					return event, nil
-				},
-			}
-			sink2 := &mockEventSink{
-				createFunc: func(event *corev1.Event) (*corev1.Event, error) {
-					recordedEvents2 = append(recordedEvents2, event)
-					return event, nil
-				},
-			}
+			sink1 := newMockEventSink()
+			sink2 := newMockEventSink()
 
 			broadcaster.StartRecordingToSink(sink1)
 			broadcaster.StartRecordingToSink(sink2)
 
 			recorder.Event(testObject, corev1.EventTypeNormal, events.ReasonCreated, "Broadcast test")
 
-			time.Sleep(20 * time.Millisecond)
+			Eventually(func() int {
+				return sink1.GetEventCount()
+			}, "100ms", "10ms").Should(Equal(1))
 
-			Expect(recordedEvents1).To(HaveLen(1))
-			Expect(recordedEvents2).To(HaveLen(1))
-			Expect(recordedEvents1[0].Message).To(Equal("Broadcast test"))
-			Expect(recordedEvents2[0].Message).To(Equal("Broadcast test"))
+			Eventually(func() int {
+				return sink2.GetEventCount()
+			}, "100ms", "10ms").Should(Equal(1))
+
+			events1 := sink1.GetEvents()
+			events2 := sink2.GetEvents()
+			Expect(events1[0].Message).To(Equal("Broadcast test"))
+			Expect(events2[0].Message).To(Equal("Broadcast test"))
 		})
 
 		It("should handle event watchers", func() {
 			receivedEvents := []*corev1.Event{}
+			var mu sync.Mutex
 
 			watcher := broadcaster.StartEventWatcher(func(event *corev1.Event) {
+				mu.Lock()
+				defer mu.Unlock()
 				receivedEvents = append(receivedEvents, event)
 			})
 			defer watcher.Stop()
 
 			recorder.Event(testObject, corev1.EventTypeNormal, events.ReasonCreated, "Watcher test")
 
-			time.Sleep(10 * time.Millisecond)
+			Eventually(func() int {
+				mu.Lock()
+				defer mu.Unlock()
+				return len(receivedEvents)
+			}, "100ms", "10ms").Should(Equal(1))
 
-			Expect(receivedEvents).To(HaveLen(1))
+			mu.Lock()
 			Expect(receivedEvents[0].Message).To(Equal("Watcher test"))
+			mu.Unlock()
 		})
 
 		It("should gracefully shutdown", func() {
-			recordedEvents := []*corev1.Event{}
-			sink := &mockEventSink{
-				createFunc: func(event *corev1.Event) (*corev1.Event, error) {
-					recordedEvents = append(recordedEvents, event)
-					return event, nil
-				},
-			}
-
-			watcher := broadcaster.StartRecordingToSink(sink)
+			sink := newMockEventSink()
+			broadcaster.StartRecordingToSink(sink)
 
 			// Record an event
 			recorder.Event(testObject, corev1.EventTypeNormal, events.ReasonCreated, "Before shutdown")
-			time.Sleep(10 * time.Millisecond)
+
+			Eventually(func() int {
+				return sink.GetEventCount()
+			}, "100ms", "10ms").Should(Equal(1))
 
 			// Shutdown broadcaster
 			broadcaster.Shutdown()
 
 			// Try to record another event (should not be processed)
 			recorder.Event(testObject, corev1.EventTypeNormal, events.ReasonUpdated, "After shutdown")
-			time.Sleep(10 * time.Millisecond)
+			time.Sleep(20 * time.Millisecond)
 
 			// Only the first event should be recorded
-			Expect(recordedEvents).To(HaveLen(1))
-			Expect(recordedEvents[0].Message).To(Equal("Before shutdown"))
-
-			// Watcher should be stopped (skip this check as it's timing sensitive)
-			_ = watcher
+			Expect(sink.GetEventCount()).To(Equal(1))
+			events := sink.GetEvents()
+			Expect(events[0].Message).To(Equal("Before shutdown"))
 		})
 	})
 
@@ -264,14 +244,7 @@ var _ = Describe("Event System", func() {
 		})
 
 		It("should create standard events using helper functions", func() {
-			recordedEvents := []*corev1.Event{}
-			sink := &mockEventSink{
-				createFunc: func(event *corev1.Event) (*corev1.Event, error) {
-					recordedEvents = append(recordedEvents, event)
-					return event, nil
-				},
-			}
-
+			sink := newMockEventSink()
 			broadcaster.StartRecordingToSink(sink)
 
 			// Test helper functions
@@ -279,12 +252,13 @@ var _ = Describe("Event System", func() {
 			events.RecordSuccessfulUpdate(recorder, testObject)
 			events.RecordSuccessfulDelete(recorder, testObject)
 
-			// Wait longer for async processing
+			// Wait for async processing
 			Eventually(func() int {
-				return len(recordedEvents)
+				return sink.GetEventCount()
 			}, "1s", "10ms").Should(Equal(3))
 
 			// Check event reasons
+			recordedEvents := sink.GetEvents()
 			reasons := []string{}
 			for _, event := range recordedEvents {
 				reasons = append(reasons, event.Reason)
@@ -300,13 +274,7 @@ var _ = Describe("Event System", func() {
 			fixedTime := metav1.NewTime(time.Date(2023, 1, 1, 12, 0, 0, 0, time.UTC))
 			mockClock := &mockClock{now: fixedTime}
 
-			recordedEvents := []*corev1.Event{}
-			sink := &mockEventSink{
-				createFunc: func(event *corev1.Event) (*corev1.Event, error) {
-					recordedEvents = append(recordedEvents, event)
-					return event, nil
-				},
-			}
+			sink := newMockEventSink()
 
 			// Create recorder with custom clock
 			customRecorder := events.NewEventRecorder(broadcaster, events.EventRecorderOptions{
@@ -319,8 +287,11 @@ var _ = Describe("Event System", func() {
 
 			customRecorder.Event(testObject, corev1.EventTypeNormal, events.ReasonCreated, "Clock test")
 
-			time.Sleep(10 * time.Millisecond)
+			Eventually(func() int {
+				return sink.GetEventCount()
+			}, "100ms", "10ms").Should(Equal(1))
 
+			recordedEvents := sink.GetEvents()
 			Expect(recordedEvents).To(HaveLen(1))
 			Expect(recordedEvents[0].FirstTimestamp).To(Equal(fixedTime))
 			Expect(recordedEvents[0].LastTimestamp).To(Equal(fixedTime))
@@ -328,33 +299,81 @@ var _ = Describe("Event System", func() {
 	})
 })
 
-// Mock implementations for testing
+// Thread-safe mock implementations for testing
 
-type mockEventSink struct {
+type threadSafeMockEventSink struct {
+	mu         sync.RWMutex
+	events     []*corev1.Event
 	createFunc func(event *corev1.Event) (*corev1.Event, error)
 	updateFunc func(event *corev1.Event) (*corev1.Event, error)
 	patchFunc  func(event *corev1.Event, data []byte) (*corev1.Event, error)
 }
 
-func (m *mockEventSink) Create(event *corev1.Event) (*corev1.Event, error) {
+func newMockEventSink() *threadSafeMockEventSink {
+	return &threadSafeMockEventSink{
+		events: make([]*corev1.Event, 0),
+	}
+}
+
+func (m *threadSafeMockEventSink) Create(event *corev1.Event) (*corev1.Event, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Record the event
+	m.events = append(m.events, event.DeepCopy())
+
 	if m.createFunc != nil {
 		return m.createFunc(event)
 	}
 	return event, nil
 }
 
-func (m *mockEventSink) Update(event *corev1.Event) (*corev1.Event, error) {
+func (m *threadSafeMockEventSink) Update(event *corev1.Event) (*corev1.Event, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Record the event
+	m.events = append(m.events, event.DeepCopy())
+
 	if m.updateFunc != nil {
 		return m.updateFunc(event)
 	}
 	return event, nil
 }
 
-func (m *mockEventSink) Patch(event *corev1.Event, data []byte) (*corev1.Event, error) {
+func (m *threadSafeMockEventSink) Patch(event *corev1.Event, data []byte) (*corev1.Event, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Record the event
+	m.events = append(m.events, event.DeepCopy())
+
 	if m.patchFunc != nil {
 		return m.patchFunc(event, data)
 	}
 	return event, nil
+}
+
+func (m *threadSafeMockEventSink) GetEvents() []*corev1.Event {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// Return a copy to avoid races
+	result := make([]*corev1.Event, len(m.events))
+	copy(result, m.events)
+	return result
+}
+
+func (m *threadSafeMockEventSink) GetEventCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.events)
+}
+
+func (m *threadSafeMockEventSink) Reset() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.events = m.events[:0]
 }
 
 type mockClock struct {
