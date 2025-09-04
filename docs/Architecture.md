@@ -90,7 +90,7 @@ graph TB
         end
         
         subgraph "Multi-Tenant Storage Layer"
-            FACTORY[Storage Factory<br/>• Backend Selection<br/>• Tenant Configuration<br/>• Isolation Enforcement]
+            STORAGE_IMPL[Storage Implementations<br/>• Memory/Pebble Backends<br/>• Direct Injection<br/>• Module Isolation]
         end
         
         subgraph "Storage Backends"
@@ -153,12 +153,12 @@ graph TB
     EVENTS -.->|Security Events| AUDIT
     
     %% Core Infrastructure Connections
-    STORAGE --> FACTORY
+    STORAGE --> STORAGE_IMPL
     SCHEME --> CODEC
     
-    %% Storage Connections
-    FACTORY --> MEMORY
-    FACTORY --> PEBBLE
+    %% Storage Backend Selection (User Choice)
+    STORAGE_IMPL --> MEMORY
+    STORAGE_IMPL --> PEBBLE
     
     %% Styling
     classDef appLayer fill:#e1f5fe,stroke:#01579b,stroke-width:2px
@@ -176,7 +176,7 @@ graph TB
     class RUNTIME,CLIENT,EVENTS coreRuntime
     class REGISTRY,VALIDATION,DEFAULTING,INFORMERS resourceMgmt
     class CODEC,SCHEME,STORAGE coreInfra
-    class FACTORY storageTenant
+    class STORAGE_IMPL storageTenant
     class MEMORY,PEBBLE storageBackend
 ```
 
@@ -497,70 +497,123 @@ type StorageSink interface {
 - **Event replay:** <100ms for typical CLI session gaps
 - **Persistent log:** Efficient append-only storage
 
-## Implementation Examples
+## K1S Initialization Patterns
+
+K1s uses a clean, modular initialization approach with dependency injection to ensure small binaries and clear module boundaries.
+
+### Core Initialization Pattern
+
+```go
+// 1. Storage Backend Creation (User Choice)
+// Only import/link what you use - enables small binaries
+import "github.com/dtomasi/k1s/storage/pebble" // or memory
+
+storage, err := pebble.NewStorage("./data/app.db")
+if err != nil {
+    log.Fatal(err)
+}
+
+// 2. K1S Runtime Creation
+// Required: Storage instance (dependency injection)
+// Optional: Functional options with sensible defaults
+runtime, err := k1s.NewRuntime(
+    storage,                    // Required parameter - concrete instance
+    k1s.WithTenant("my-app"),   // Optional (default: "default")
+    k1s.WithRBAC(rbacConfig),   // Optional (default: disabled)
+)
+if err != nil {
+    log.Fatal(err)  
+}
+defer runtime.Stop()
+
+// 3. Core Resources are automatically registered
+// Namespace, ConfigMap, Secret, ServiceAccount, Event
+client := runtime.GetClient()  // Ready to use immediately
+```
 
 ### CLI Application Integration
 
 ```go
+import (
+    "github.com/dtomasi/k1s/core/pkg/cli-runtime"
+    "github.com/dtomasi/k1s/storage/pebble"
+)
+
 func main() {
-    // Initialize k1s runtime with embedded storage
-    runtime, err := k1s.NewRuntime(k1s.Config{
-        Storage: storage.Config{
-            Type: "pebble",
-            Path: "./data/k1s-demo.db",
-            TenantPrefix: "k1s-demo",
-        },
-    })
+    // 1. Create storage backend
+    storage, err := pebble.NewStorage("./data/inventory.db")
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // 2. Create k1s runtime
+    runtime, err := k1s.NewRuntime(
+        storage,
+        k1s.WithTenant("inventory-app"),
+    )
     if err != nil {
         log.Fatal(err)
     }
     defer runtime.Stop()
     
-    // Register API types
-    if err := runtime.RegisterAPI(&v1alpha1.Item{}, &v1alpha1.Category{}); err != nil {
-        log.Fatal(err)
-    }
+    // 3. Create CLI commands directly
+    rootCmd := &cobra.Command{Use: "inventory-cli"}
+    rootCmd.AddCommand(
+        cliruntime.NewGetCommand(runtime),      // k1s get items
+        cliruntime.NewCreateCommand(runtime),   // k1s create -f item.yaml
+        cliruntime.NewApplyCommand(runtime),    // k1s apply -f item.yaml
+        cliruntime.NewDeleteCommand(runtime),   // k1s delete item my-item
+    )
     
-    // Create CLI with k1s client
-    cli := cliruntime.NewCLI(cliruntime.Config{
-        Client: runtime.GetClient(),
-        Scheme: runtime.GetScheme(),
-    })
-    
-    // Execute command
-    if err := cli.Execute(); err != nil {
+    // 4. Execute
+    if err := rootCmd.Execute(); err != nil {
         log.Fatal(err)
     }
 }
 ```
 
-### Controller Integration
+### Controller Integration (Kubernetes-Compatible)
 
 ```go
+import (
+    "github.com/dtomasi/k1s/core/pkg/controller"
+    "github.com/dtomasi/k1s/storage/memory"
+    ctrl "sigs.k8s.io/controller-runtime"
+)
+
 func main() {
-    // Initialize k1s runtime
-    runtime, err := k1s.NewRuntime(k1s.Config{
-        Storage: storage.Config{
-            Type: "memory", // Fast for controller testing
-            TenantPrefix: "controller-test",
-        },
-    })
+    // 1. Create storage backend
+    storage := memory.NewStorage() // Fast for controller testing
+    
+    // 2. Create k1s runtime
+    runtime, err := k1s.NewRuntime(
+        storage,
+        k1s.WithTenant("controller-test"),
+    )
     if err != nil {
         log.Fatal(err)
     }
     defer runtime.Stop()
     
-    // Create controller manager - CLI-optimized
-    mgr := controller.NewManager(runtime)
-    
-    // Register controller - same as controller-runtime
-    if err := ctrl.NewControllerManagedBy(mgr).
-        For(&v1alpha1.Item{}).
-        Complete(&ItemController{}); err != nil {
+    // 3. Create controller manager (kubernetes-style API)
+    mgr, err := controller.NewManager(runtime, controller.Options{
+        MetricsBindAddress:     ":8080",
+        HealthProbeBindAddress: ":8081",
+        LeaderElection:         false, // CLI-optimized
+    })
+    if err != nil {
         log.Fatal(err)
     }
     
-    // CLI-triggered execution (not continuous)
+    // 4. Register controller (identical to controller-runtime)
+    if err = (&ItemReconciler{
+        Client: mgr.GetClient(), // k1s client
+        Scheme: mgr.GetScheme(), // k1s scheme
+    }).SetupWithManager(mgr); err != nil {
+        log.Fatal(err)
+    }
+    
+    // 5. Start manager (identical to controller-runtime)
     ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
     defer cancel()
     
@@ -569,6 +622,43 @@ func main() {
     }
 }
 ```
+
+### Module Boundaries & Binary Size
+
+K1s uses strict module separation to enable small binaries:
+
+```go
+// Minimal CLI (only memory storage):
+import (
+    "github.com/dtomasi/k1s/core"
+    "github.com/dtomasi/k1s/core/pkg/cli-runtime" 
+    "github.com/dtomasi/k1s/storage/memory"
+)
+// Result: ~5MB binary with core + CLI + memory storage
+
+// Production CLI (with Pebble):
+import (
+    "github.com/dtomasi/k1s/core"
+    "github.com/dtomasi/k1s/core/pkg/cli-runtime"
+    "github.com/dtomasi/k1s/storage/pebble" 
+)
+// Result: ~12MB binary with LSM-tree storage
+
+// Controller application:
+import (
+    "github.com/dtomasi/k1s/core"
+    "github.com/dtomasi/k1s/core/pkg/controller"
+    "github.com/dtomasi/k1s/storage/memory"
+)
+// Result: ~8MB binary with controller runtime
+```
+
+**Key Benefits:**
+1. **Small Binaries**: Only imported modules are linked
+2. **Clean Interfaces**: Core depends only on interfaces  
+3. **User Choice**: Storage backend decided at compile time
+4. **Type Safety**: No string-based configuration
+5. **Kubernetes Compatible**: Familiar patterns and APIs
 
 ## RBAC Integration (Optional)
 
