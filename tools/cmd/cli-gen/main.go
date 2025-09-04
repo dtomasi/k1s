@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -15,63 +16,100 @@ import (
 
 var (
 	outputDir string
+	pathsFlag string
 	verbose   bool
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "cli-gen [flags] paths...",
+	Use:   "cli-gen [flags]",
 	Short: "Generate k1s instrumentation from kubebuilder markers",
-	Long: `cli-gen is a code generation tool that extracts kubebuilder markers
-from Go source files and generates k1s runtime instrumentation.
+	Long: `cli-gen generates k1s instrumentation code from kubebuilder markers in Go source files.
+It extracts resource metadata, validation rules, print columns, and defaulting strategies
+to create runtime configuration for k1s.
 
-Similar to controller-gen, cli-gen processes kubebuilder markers in Go source
-files to generate:
-- Resource metadata lookup functions
-- Validation strategies based on markers
+Compatible with controller-gen syntax, it processes kubebuilder markers to generate:
+- Resource metadata lookup functions  
+- Validation strategy implementations
 - Print column definitions for CLI output
+- Defaulting strategy implementations
 
-Example usage:
-  cli-gen -output-dir=./generated ./api/v1alpha1
-  cli-gen --verbose --output-dir=./pkg/generated ./examples/api/...`,
+Examples:
+  # Generate k1s instrumentation for a specific API package
+  cli-gen paths=./apis/v1alpha1/... output:dir=./pkg/generated
+
+  # Generate for multiple paths
+  cli-gen paths=./apis/...,./pkg/types/... output:dir=./generated
+
+  # Using flags (alternative syntax)
+  cli-gen --paths=./apis/v1alpha1/... --output-dir=./generated`,
 	RunE: func(_ *cobra.Command, args []string) error {
-		if len(args) == 0 {
-			return fmt.Errorf("no input paths specified")
+		// Parse controller-gen style arguments
+		var parsedPaths []string
+		var parsedOutputDir string
+
+		for _, arg := range args {
+			if strings.HasPrefix(arg, "paths=") {
+				pathsStr := strings.TrimPrefix(arg, "paths=")
+				parsedPaths = append(parsedPaths, strings.Split(pathsStr, ",")...)
+			} else if strings.HasPrefix(arg, "output:dir=") {
+				parsedOutputDir = strings.TrimPrefix(arg, "output:dir=")
+			}
 		}
 
-		if outputDir == "" {
-			return fmt.Errorf("output directory is required (use --output-dir)")
+		// Use flag values if no args provided
+		if len(parsedPaths) == 0 && len(pathsFlag) > 0 {
+			parsedPaths = strings.Split(pathsFlag, ",")
+		}
+		if parsedOutputDir == "" {
+			parsedOutputDir = outputDir
+		}
+
+		if len(parsedPaths) == 0 {
+			return fmt.Errorf("no paths provided - use paths=<path1>,<path2>... or --paths flag")
+		}
+
+		if parsedOutputDir == "" {
+			return fmt.Errorf("no output directory provided - use output:dir=<dir> or --output-dir flag")
 		}
 
 		if verbose {
-			fmt.Printf("cli-gen: processing %d paths\n", len(args))
-			fmt.Printf("cli-gen: output directory: %s\n", outputDir)
+			fmt.Printf("cli-gen: processing paths: %v\n", parsedPaths)
+			fmt.Printf("cli-gen: output directory: %s\n", parsedOutputDir)
 		}
 
-		// Process paths and expand wildcards
+		// Expand glob patterns in paths
 		var expandedPaths []string
-		for _, arg := range args {
-			if filepath.Base(arg) == "..." {
-				// Handle ./path/... pattern
-				baseDir := filepath.Dir(arg)
+		for _, path := range parsedPaths {
+			// Handle ./path/... pattern
+			if strings.HasSuffix(path, "/...") {
+				baseDir := strings.TrimSuffix(path, "/...")
 				matches, err := filepath.Glob(filepath.Join(baseDir, "*"))
 				if err != nil {
-					return fmt.Errorf("failed to expand path %s: %w", arg, err)
+					return fmt.Errorf("failed to expand path %s: %w", path, err)
 				}
 				expandedPaths = append(expandedPaths, matches...)
 			} else {
-				expandedPaths = append(expandedPaths, arg)
+				matches, err := filepath.Glob(path)
+				if err != nil {
+					return fmt.Errorf("invalid glob pattern %s: %w", path, err)
+				}
+				if len(matches) == 0 {
+					expandedPaths = append(expandedPaths, path)
+				} else {
+					expandedPaths = append(expandedPaths, matches...)
+				}
 			}
 		}
 
 		if verbose {
-			fmt.Printf("cli-gen: expanded to %d paths: %v\n", len(expandedPaths), expandedPaths)
+			fmt.Printf("cli-gen: expanded paths: %v\n", expandedPaths)
 		}
 
-		// Create extractor and extract resource information
+		// Extract resource information
 		ext := extractor.NewExtractor()
 		resources, err := ext.Extract(expandedPaths)
 		if err != nil {
-			return fmt.Errorf("failed to extract markers: %w", err)
+			return fmt.Errorf("failed to extract resource information: %w", err)
 		}
 
 		if len(resources) == 0 {
@@ -80,25 +118,26 @@ Example usage:
 		}
 
 		if verbose {
-			fmt.Printf("cli-gen: found %d resources:\n", len(resources))
+			fmt.Printf("cli-gen: extracted %d resources\n", len(resources))
 			for _, res := range resources {
 				fmt.Printf("  - %s (%s)\n", res.Kind, res.Name)
 			}
 		}
 
-		// Create generator and generate code
-		gen := generator.NewGenerator(outputDir)
+		// Generate k1s instrumentation
+		gen := generator.NewGenerator(parsedOutputDir)
 		if err := gen.Generate(resources); err != nil {
-			return fmt.Errorf("failed to generate code: %w", err)
+			return fmt.Errorf("failed to generate k1s instrumentation: %w", err)
 		}
 
-		fmt.Printf("cli-gen: successfully generated k1s instrumentation in %s\n", outputDir)
+		fmt.Printf("cli-gen: successfully generated k1s instrumentation in %s\n", parsedOutputDir)
 		return nil
 	},
 }
 
 func init() {
 	rootCmd.Flags().StringVarP(&outputDir, "output-dir", "o", "", "Directory to write generated files")
+	rootCmd.Flags().StringVarP(&pathsFlag, "paths", "p", "", "Comma-separated list of paths to process")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 }
 
