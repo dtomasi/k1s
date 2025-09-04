@@ -10,7 +10,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 
-	"github.com/dtomasi/k1s/core/pkg/defaulting"
+	"github.com/dtomasi/k1s/core/defaulting"
 )
 
 // GetDefaultingStrategy returns the defaulting strategy for a given kind

@@ -17,7 +17,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	"github.com/dtomasi/k1s/core/pkg/validation"
+	"github.com/dtomasi/k1s/core/validation"
 )
 
 // Pre-compiled CEL expressions for optimal runtime performance

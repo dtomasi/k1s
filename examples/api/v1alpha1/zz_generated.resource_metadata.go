@@ -8,7 +8,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/dtomasi/k1s/core/pkg/registry"
+	"github.com/dtomasi/k1s/core/registry"
 )
 
 // ResourceMetadata contains metadata about a resource type

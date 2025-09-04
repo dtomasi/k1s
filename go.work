@@ -1,6 +1,8 @@
 go 1.25.0
 
 use (
+	./cli-runtime
+	./controller-runtime
 	./core
 	./examples
 	./storage/memory

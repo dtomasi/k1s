@@ -257,8 +257,12 @@ _ensure-go-version version:
     #!/usr/bin/env bash
     current_version=$(go version | awk '{print $3}' | sed 's/go//')
     if [ "$current_version" != "{{ version }}" ]; then
-        echo "📦 Installing Go {{ version }}"
-        hermit install go@{{ version }}
+        echo "📦 Go version {{ version }} required, but $current_version is installed"
+        echo "⚠️  Continuing with installed version $current_version"
+        echo "💡 If you need Go {{ version }} specifically, install it manually"
+        # Don't try to install via hermit - use system Go as source of truth
+    else
+        echo "✅ Go {{ version }} is available"
     fi
 
 # === Format Implementations ===
@@ -427,8 +431,8 @@ _build-all:
     echo "🔧 Building CLI tools"
 
     # Build cli-gen tool
-    cd "{{ PROJECT_ROOT }}/tools"
-    go build -o ../bin/cli-gen ./cmd/cli-gen
+    cd "{{ PROJECT_ROOT }}/tools/cli-gen"
+    go build -o ../../bin/cli-gen ./cmd
     echo "✅ Built cli-gen"
 
     # Build k1s-demo (if main.go exists)
