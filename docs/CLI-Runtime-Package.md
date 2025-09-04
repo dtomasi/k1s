@@ -1,6 +1,7 @@
 # K1S CLI-Runtime Package Specification
 
 **Related Documentation:**
+- [Two-Tier Runtime Architecture](Two-Tier-Runtime-Architecture.md) - CoreClient vs ManagedRuntime design
 - [Controller-Runtime Package](Controller-Runtime-Package.md) - Controller runtime for CLI environments
 - [Architecture](Architecture.md) - Complete k1s system architecture
 
@@ -13,7 +14,8 @@ The CLI-Runtime package (`core/pkg/cli-runtime/`) provides helper functions and 
 ### 1. **Resource Operation Handlers**
 - Provide kubectl-compatible operation implementations
 - Handle get, create, apply, delete operations with proper error handling
-- Accept k1s runtime as dependency injection
+- Support both CoreClient (fast CLI ops) and ManagedRuntime (advanced features)
+- Automatic runtime tier selection based on operation requirements
 
 ### 2. **Output Formatting & Printers**
 - Multiple output formats: table, yaml, json, name, custom-columns
@@ -73,23 +75,24 @@ import (
     "k8s.io/apimachinery/pkg/runtime/object"
 )
 
-// GetHandler handles get operations  
+// GetHandler handles get operations with runtime tier optimization
 type GetHandler struct {
-    runtime *runtime.Runtime
+    client client.Client  // Works with both CoreClient and ManagedRuntime
 }
 
 // NewGetHandler creates a new get handler
-func NewGetHandler(runtime *runtime.Runtime) *GetHandler {
-    return &GetHandler{runtime: runtime}
+// Accepts any client that implements client.Client interface
+func NewGetHandler(client client.Client) *GetHandler {
+    return &GetHandler{client: client}
 }
 
-// Handle executes the get operation
+// Handle executes the get operation  
 func (h *GetHandler) Handle(ctx context.Context, req GetRequest) (*GetResponse, error) {
-    client := h.runtime.GetClient()
+    // Same code works with CoreClient (~25ms) or ManagedRuntime (~75ms)
     
     // Build resource query using builder pattern
     builder := NewResourceBuilder().
-        WithClient(client).
+        WithClient(h.client).
         WithResourceType(req.ResourceType)
     
     if req.ResourceName != "" {
@@ -156,12 +159,16 @@ import (
 )
 
 func main() {
-    // Initialize k1s runtime
+    // Initialize k1s with CoreClient for fast CLI operations
     storage, _ := pebble.NewStorage("./data/app.db")
-    runtime, _ := k1s.NewRuntime(storage, k1s.WithTenant("my-app"))
+    client, _ := k1s.NewCoreClient(k1s.CoreClientOptions{
+        Storage:  storage,
+        Scheme:   k1s.GetScheme(),
+        Registry: k1s.GetRegistry(),
+    })
     
-    // Create handlers
-    getHandler := handlers.NewGetHandler(runtime)
+    // Create handlers (same interface, optimized performance)
+    getHandler := handlers.NewGetHandler(client)
     
     // Create cobra command manually
     getCmd := &cobra.Command{
@@ -445,12 +452,19 @@ func (tp *tablePrinter) PrintObjects(objects []runtime.Object, w io.Writer) erro
 
 ## Implementation Notes
 
-The CLI-Runtime package focuses on **utilities and helpers** rather than complete solutions. It provides:
+The CLI-Runtime package focuses on **utilities and helpers** optimized for k1s two-tier architecture. It provides:
 
+- **Runtime-Agnostic Handlers**: Work seamlessly with CoreClient (fast) or ManagedRuntime (full-featured)
 - **Operation Handlers**: Implement kubectl-compatible operations (get, create, apply, delete)
+- **Performance Optimization**: Automatic runtime tier selection based on operation requirements
 - **Flag Sets**: Reusable pflag.FlagSet instances for common operation flags
 - **Builders**: kubectl-style resource selection and filtering
 - **Printers**: Multiple output format support with pluggable system
 - **Options Parsing**: Utilities to parse flags into typed request structures
 
-Users create their own cobra commands and use these helpers to implement the functionality. This keeps the CLI-Runtime focused on providing the essential building blocks while letting users control the command structure and user experience.
+**Key Design Principle**: All handlers accept the generic `client.Client` interface, making them compatible with both CoreClient and ManagedRuntime without code changes. Users can choose the appropriate runtime tier based on their performance requirements:
+
+- **CoreClient**: Use for standard CLI commands requiring <25ms startup
+- **ManagedRuntime**: Use when watch, controllers, or advanced events are needed
+
+Users create their own cobra commands and use these helpers to implement the functionality, benefiting from k1s performance optimizations automatically.

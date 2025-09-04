@@ -6,6 +6,7 @@
 - [RBAC Architecture](RBAC-Architecture.md) - RBAC integration specification
 - [CLI-Runtime Package](CLI-Runtime-Package.md) - CLI runtime specification
 - [Controller-Runtime Package](Controller-Runtime-Package.md) - Controller runtime specification
+- [Graceful Shutdown & Work Tracking](Graceful-Shutdown-Work-Tracking.md) - Work tracking and graceful shutdown
 
 ## Implementation Phases
 
@@ -81,28 +82,33 @@
 - [ ] Integration tests pass
 - [ ] Zero golangci-lint errors
 
-### Phase 4: Core Runtime (2-3 weeks)
+### Phase 4: Two-Tier Runtime Implementation (3-4 weeks)
 **Dependencies:** Phase 3 completed
 **Priority:** High
 
 **Components:**
-- Main runtime orchestration (`core/pkg/runtime/`)
-- Client implementation (`core/pkg/client/`)
-- Informer system foundation (`core/pkg/informers/`)
-- End-to-end basic operations
+- CoreClient implementation (`core/pkg/client/core.go`)
+- Plugin discovery system (`core/pkg/plugins/discovery.go`)
+- ManagedRuntime wrapper (`core/pkg/runtime/managed.go`)
+- Client interface compatibility
+- Performance optimization
 
 **Deliverables:**
-- Kubernetes controller-runtime compatible client
-- Runtime orchestration and lifecycle management
-- Basic informer factory
-- CRUD operations working end-to-end
+- **CoreClient**: Fast CLI operations with plugin discovery (<25ms startup)
+- **ManagedRuntime**: Full-featured runtime with background components (<75ms startup)
+- **Plugin Discovery**: Lightweight type discovery without full plugin loading
+- **Unified API**: Both tiers implement identical Client interface
+- Performance benchmarks and optimizations
 
 **Success Criteria:**
-- [ ] Client implements controller-runtime interfaces
-- [ ] Basic CRUD operations work
-- [ ] Runtime manages component lifecycle
-- [ ] Informers provide watch capability
+- [ ] CoreClient startup time <25ms with plugin discovery
+- [ ] ManagedRuntime startup time <75ms with all components
+- [ ] Both implement identical Client interface
+- [ ] Plugin types discoverable without full plugin initialization
+- [ ] Memory usage targets met (CoreClient <10MB, ManagedRuntime <50MB)
+- [ ] All existing CRUD operations work with both tiers
 - [ ] Zero golangci-lint errors
+- [ ] Comprehensive test coverage >90%
 
 ### Phase 5: Event System (2-3 weeks)
 **Dependencies:** Phase 4 completed
@@ -112,19 +118,20 @@
 - Event recorder implementation (`core/pkg/events/`)
 - Event broadcaster with sinks
 - Storage sink for event persistence
-- Client integration
+- ManagedRuntime integration (CoreClient has basic event support)
 
 **Deliverables:**
 - Kubernetes-compatible EventRecorder
-- Event broadcasting to multiple sinks
+- Event broadcasting to multiple sinks (ManagedRuntime only)
 - **Events stored using core Event resources**
-- Integration with client operations
+- Integration with both runtime tiers
 
 **Success Criteria:**
 - [ ] EventRecorder follows Kubernetes patterns
 - [ ] Events are stored and retrievable using core Event resources
-- [ ] Broadcasting works to multiple sinks
-- [ ] Client automatically records events
+- [ ] Broadcasting works to multiple sinks in ManagedRuntime
+- [ ] CoreClient has basic event recording capability
+- [ ] ManagedRuntime has full event system with background processing
 - [ ] Zero golangci-lint errors
 
 ### Phase 5b: RBAC Foundation (1-2 weeks)  
@@ -173,7 +180,33 @@
 - [ ] Example controllers demonstrate usage
 - [ ] Zero golangci-lint errors
 
-### Phase 7: CLI Runtime Package (2-3 weeks)
+### Phase 7: Work Tracking & Graceful Shutdown (2-3 weeks)
+**Dependencies:** Phase 6 completed
+**Priority:** High
+
+**Components:**
+- Enhanced metrics infrastructure (`core/pkg/metrics/`)
+- Work tracking registry (`core/pkg/worktracking/`)
+- Metrics-based decorators for storage and client
+- Runtime graceful shutdown coordination
+- Integration testing
+
+**Deliverables:**
+- Enhanced metrics with in-flight tracking
+- Central work registry with component coordination
+- Decorator pattern for automatic work tracking
+- Graceful shutdown with timeout handling
+- Signal handler integration
+
+**Success Criteria:**
+- [ ] All operations complete before process termination
+- [ ] Zero data loss during shutdown scenarios
+- [ ] <1% performance overhead during normal operations
+- [ ] Configurable timeout behavior
+- [ ] Structured logging and progress monitoring
+- [ ] Zero golangci-lint errors
+
+### Phase 8: CLI Runtime Package (2-3 weeks)
 **Dependencies:** Phase 4 completed (can run parallel to Phase 5-6)
 **Priority:** Medium
 
@@ -196,7 +229,7 @@
 - [ ] Integration with k1s client seamless
 - [ ] Zero golangci-lint errors
 
-### Phase 8: Code Generation (2-3 weeks)
+### Phase 9: Code Generation (2-3 weeks)
 **Dependencies:** Phase 1-4 completed
 **Priority:** Medium
 
@@ -219,7 +252,7 @@
 - [ ] OpenAPI schemas are valid
 - [ ] Zero golangci-lint errors
 
-### Phase 9: Performance Optimization (2-3 weeks)
+### Phase 10: Performance Optimization (2-3 weeks)
 **Dependencies:** Phase 2 completed
 **Priority:** Low
 
@@ -292,7 +325,7 @@ By completion of all phases:
 - [ ] Performance targets met for all storage backends
 - [ ] Complete documentation with examples
 
-**Estimated Total Implementation Time:** 26-34 weeks (6.5-8.5 months)
+**Estimated Total Implementation Time:** 28-37 weeks (7-9 months)
 
 ## Work-Package Based Implementation Strategy
 
@@ -357,8 +390,10 @@ Each work-package is broken down into user stories following this format:
 - `phase/5-events` - Event system
 - `phase/5b-rbac` - RBAC foundation (parallel)
 - `phase/6-controllers` - Controller runtime
-- `phase/7-cli` - CLI runtime package
-- `phase/8-codegen` - Code generation tools
+- `phase/7-worktracking` - Work tracking and graceful shutdown
+- `phase/8-cli` - CLI runtime package
+- `phase/9-codegen` - Code generation tools
+- `phase/10-performance` - Performance optimization
 
 **Component Labels:**
 - `component/core` - Core k1s runtime
@@ -779,6 +814,106 @@ Each work-package is broken down into user stories following this format:
 **Files:** `core/pkg/cli-runtime/printers.go`
 **Tests:** Output format tests, column tests, streaming tests
 
+### WP-021: Enhanced Metrics Infrastructure
+**Phase:** 7-Work Tracking | **Priority:** High | **Size:** M
+
+**As a** k1s system
+**I want** enhanced metrics with in-flight work tracking
+**So that** I can monitor active operations for graceful shutdown
+
+**Acceptance Criteria:**
+- [ ] EnhancedMetrics struct with inFlight, inFlightPeak, totalStarted counters
+- [ ] StartWork() and EndWork() methods with atomic operations
+- [ ] Thread-safe peak tracking with lock-free compare-and-swap
+- [ ] Integration with existing storage backend metrics
+- [ ] Performance: <1% overhead vs existing metrics
+- [ ] Comprehensive test suite with concurrency tests
+- [ ] Zero memory leaks under load
+
+**Dependencies:** WP-005 (Memory Storage), WP-006 (Pebble Storage)
+**Files:** `core/pkg/metrics/enhanced.go`
+**Tests:** Concurrency tests, performance benchmarks, atomic operation tests
+
+### WP-022: Work Tracking Registry
+**Phase:** 7-Work Tracking | **Priority:** High | **Size:** M
+
+**As a** k1s runtime  
+**I want** central work registry with component coordination
+**So that** I can coordinate graceful shutdown across all components
+
+**Acceptance Criteria:**
+- [ ] WorkRegistry interface with component registration
+- [ ] Central registry implementation with thread-safe operations
+- [ ] Component work status aggregation
+- [ ] Shutdown state management and signaling
+- [ ] Configurable timeout handling
+- [ ] Progress monitoring with structured logging
+- [ ] Integration with runtime lifecycle
+
+**Dependencies:** WP-021, WP-012 (Runtime)
+**Files:** `core/pkg/worktracking/registry.go`, `core/pkg/worktracking/interface.go`
+**Tests:** Registry tests, component coordination tests, shutdown tests
+
+### WP-023: Storage Metrics Decorator
+**Phase:** 7-Work Tracking | **Priority:** High | **Size:** L
+
+**As a** k1s storage backend
+**I want** automatic work tracking via decorator pattern
+**So that** all storage operations are tracked without code changes
+
+**Acceptance Criteria:**
+- [ ] MetricsDecorator implementing storage.Interface
+- [ ] Automatic StartWork/EndWork around all operations  
+- [ ] Shutdown state checking (reject new work when shutting down)
+- [ ] Success/failure tracking for operations
+- [ ] Integration with both Memory and Pebble backends
+- [ ] Zero functional impact on storage operations
+- [ ] Performance: <1% overhead
+
+**Dependencies:** WP-021, WP-022, WP-003 (Storage Interface)
+**Files:** `core/pkg/metrics/decorator.go`
+**Tests:** Decorator tests, integration tests with storage backends, performance tests
+
+### WP-024: Client Work Tracking Integration
+**Phase:** 7-Work Tracking | **Priority:** High | **Size:** M
+
+**As a** k1s client
+**I want** work tracking for all client operations
+**So that** CRUD operations complete before shutdown
+
+**Acceptance Criteria:**
+- [ ] ClientDecorator implementing client.Client interface
+- [ ] Work tracking for Get, List, Create, Update, Delete, Patch operations
+- [ ] Integration with validation and defaulting pipelines
+- [ ] Shutdown state management
+- [ ] Error handling and metrics collection
+- [ ] Status subresource operation tracking
+- [ ] Watch operation as long-running work
+
+**Dependencies:** WP-021, WP-022, WP-013 (Client Implementation)
+**Files:** `core/pkg/client/worktracking.go`
+**Tests:** Client operation tests, work tracking integration tests
+
+### WP-025: Runtime Graceful Shutdown
+**Phase:** 7-Work Tracking | **Priority:** Critical | **Size:** L
+
+**As a** k1s runtime
+**I want** graceful shutdown coordination with work completion guarantees
+**So that** no operations are lost during process termination
+
+**Acceptance Criteria:**
+- [ ] Signal handler integration (SIGTERM, SIGINT)
+- [ ] Multi-phase shutdown sequence implementation
+- [ ] Work completion monitoring with timeout
+- [ ] Component shutdown coordination
+- [ ] Progress logging and monitoring
+- [ ] Configuration for shutdown behavior
+- [ ] Integration testing with all components
+
+**Dependencies:** WP-022, WP-023, WP-024, WP-012 (Runtime)
+**Files:** `core/pkg/runtime/shutdown.go`
+**Tests:** End-to-end shutdown tests, timeout tests, signal handling tests
+
 ## Updated Phase Dependencies
 
 ```mermaid
@@ -789,18 +924,23 @@ graph TD
     P3 --> P4[Phase 4: Core Runtime<br/>2-3 weeks]
     P4 --> P5[Phase 5: Event System<br/>2-3 weeks]
     P5 --> P6[Phase 6: Controller Runtime<br/>3-4 weeks]
-    P4 --> P7[Phase 7: CLI Runtime<br/>2-3 weeks]
-    P1 --> P8[Phase 8: Code Generation<br/>2-3 weeks]
-    P2 --> P9[Phase 9: Performance Optimization<br/>2-3 weeks]
+    P6 --> P7[Phase 7: Work Tracking<br/>+ Graceful Shutdown<br/>2-3 weeks]
+    P4 --> P8[Phase 8: CLI Runtime<br/>2-3 weeks]
+    P1 --> P9[Phase 9: Code Generation<br/>2-3 weeks]
+    P2 --> P10[Phase 10: Performance Optimization<br/>2-3 weeks]
     
     %% RBAC integration points
     P5b --> P6
-    P5b --> P7
+    P5b --> P8
+    
+    %% Work tracking integration points
+    P7 --> P8
+    P7 --> P9
     
     %% Parallel execution paths
-    P5 -.-> P7
-    P8 -.-> P6
+    P5 -.-> P8
     P9 -.-> P6
+    P10 -.-> P6
     
     classDef critical fill:#ffcccc
     classDef high fill:#ffffcc  
@@ -808,7 +948,7 @@ graph TD
     classDef low fill:#ccccff
     
     class P1,P2,P3,P4 critical
-    class P5,P6 high
-    class P5b,P7,P8 medium
-    class P9 low
+    class P5,P6,P7 high
+    class P5b,P8,P9 medium
+    class P10 low
 ```
