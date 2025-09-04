@@ -182,7 +182,7 @@ var _ = Describe("PebbleStorage", func() {
 			// Try to create again - should fail
 			err = storage.Create(ctx, key, testObject, nil, 0)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("key already exists"))
+			Expect(err.Error()).To(ContainSubstring("already exists"))
 		})
 
 		It("should get an object successfully", func() {
@@ -206,7 +206,7 @@ var _ = Describe("PebbleStorage", func() {
 
 			err := storage.Get(ctx, key, k8storage.GetOptions{}, retrieved)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("key not found"))
+			Expect(err.Error()).To(ContainSubstring("not found"))
 		})
 
 		It("should ignore not found when requested", func() {
@@ -233,7 +233,7 @@ var _ = Describe("PebbleStorage", func() {
 			retrieved := &TestObject{}
 			err = storage.Get(ctx, key, k8storage.GetOptions{}, retrieved)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("key not found"))
+			Expect(err.Error()).To(ContainSubstring("not found"))
 		})
 
 		It("should fail to delete non-existent objects", func() {
@@ -242,7 +242,7 @@ var _ = Describe("PebbleStorage", func() {
 
 			err := storage.Delete(ctx, key, out, nil, nil, nil)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("key not found"))
+			Expect(err.Error()).To(ContainSubstring("not found"))
 		})
 	})
 

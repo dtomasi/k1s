@@ -9,8 +9,8 @@ import (
 )
 
 // Interface defines the Kubernetes-compatible storage interface for k1s.
-// This interface must match k8s.io/apiserver/pkg/storage.Interface exactly
-// to ensure compatibility with existing Kubernetes storage implementations.
+// This interface includes all methods from k8s.io/apiserver/pkg/storage.Interface
+// to ensure full compatibility with existing Kubernetes storage implementations.
 type Interface interface {
 	// Versioner returns a storage.Versioner for managing resource versions
 	Versioner() storage.Versioner
@@ -43,6 +43,28 @@ type Interface interface {
 	// The returned contents may be delayed, but it is guaranteed that they will
 	// match 'opts.ResourceVersion' according to database consistency rules (e.g. linearizability).
 	List(ctx context.Context, key string, opts storage.ListOptions, listObj runtime.Object) error
+
+	// GuaranteedUpdate keeps calling 'tryUpdate()' to update key 'key' (of type 'destination')
+	// retrying the update until success if there is index conflict.
+	// Note that object passed to tryUpdate may change across invocations of tryUpdate() if
+	// other writers are simultaneously updating it, so tryUpdate() needs to take into account
+	// the current contents of the object when deciding how the update object should look.
+	// If the key doesn't exist, it will return NotFound storage error if ignoreNotFound=false
+	// or zero value in 'destination' if ignoreNotFound=true.
+	// If the eventual successful update will return an error, it will also return an error.
+	// If 'cachedExistingObject' is non-nil, it can be used as a suggestion about the
+	// current version of the object to avoid read operation from storage to get it.
+	GuaranteedUpdate(ctx context.Context, key string, destination runtime.Object, ignoreNotFound bool,
+		preconditions *storage.Preconditions, tryUpdate storage.UpdateFunc, cachedExistingObject runtime.Object) error
+
+	// RequestWatchProgress requests the a watch stream progress status be sent in the
+	// watch response stream as soon as possible.
+	// Used by apiservers to verify that the watch is making progress.
+	RequestWatchProgress(ctx context.Context) error
+
+	// RequestProgress requests a versioned response be sent to the provided request.
+	// Used by apiservers to ensure consistency across requests.
+	RequestProgress(ctx context.Context) error
 }
 
 // Backend defines additional methods that storage backends may implement
