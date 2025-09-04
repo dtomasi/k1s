@@ -103,6 +103,39 @@ func (m *mockStorage) Watch(ctx context.Context, key string, opts storage.ListOp
 	return &mockWatcher{ch: ch}, nil
 }
 
+func (m *mockStorage) GuaranteedUpdate(ctx context.Context, key string, destination runtime.Object, ignoreNotFound bool, preconditions *storage.Preconditions, tryUpdate storage.UpdateFunc, cachedExistingObject runtime.Object) error {
+	existing, exists := m.objects[key]
+	if !exists && !ignoreNotFound {
+		return errors.New("object not found")
+	}
+
+	var current runtime.Object
+	if exists {
+		current = existing
+	} else {
+		current = destination.DeepCopyObject()
+	}
+
+	updated, _, err := tryUpdate(current, storage.ResponseMeta{})
+	if err != nil {
+		return err
+	}
+
+	m.objects[key] = updated.DeepCopyObject()
+	copyObjectFields(updated, destination)
+	return nil
+}
+
+func (m *mockStorage) RequestWatchProgress(ctx context.Context) error {
+	// Mock implementation - no-op for testing
+	return nil
+}
+
+func (m *mockStorage) RequestProgress(ctx context.Context) error {
+	// Mock implementation - no-op for testing
+	return nil
+}
+
 // mockWatcher implements watch.Interface
 type mockWatcher struct {
 	ch chan watch.Event
