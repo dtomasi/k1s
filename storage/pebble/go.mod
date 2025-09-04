@@ -1,6 +1,6 @@
 module github.com/dtomasi/k1s/storage/pebble
 
-go 1.25.0
+go 1.25.1
 
 require (
 	github.com/cockroachdb/pebble v1.1.5

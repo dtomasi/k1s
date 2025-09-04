@@ -1,6 +1,6 @@
 module github.com/dtomasi/k1s/storage/memory
 
-go 1.25.0
+go 1.25.1
 
 require (
 	github.com/dtomasi/k1s/core v0.0.0
