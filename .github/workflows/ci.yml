@@ -602,7 +602,7 @@ jobs:
   coverage:
     name: Coverage Check
     runs-on: ubuntu-latest
-    needs: [test-core, test-memory, test-pebble, test-cli-gen, test-cli-runtime, test-controller-runtime, test-examples]
+    needs: [test-core, test-memory, test-pebble, test-cli-gen]
     if: always()
     
     steps:
@@ -686,9 +686,10 @@ jobs:
           check_module_coverage "Memory Storage" "storage/memory" "coverage-memory.out" "70.0"
           check_module_coverage "Pebble Storage" "storage/pebble" "coverage-pebble.out" "65.0"
           check_module_coverage "CLI-Gen Tool" "tools/cli-gen" "coverage-cli-gen.out" "70.0"
-          check_module_coverage "CLI Runtime" "cli-runtime" "coverage-cli-runtime.out" "70.0"
-          check_module_coverage "Controller Runtime" "controller-runtime" "coverage-controller-runtime.out" "70.0"
-          check_module_coverage "Examples" "examples" "coverage-examples.out" "60.0"
+          # Unimplemented modules excluded from coverage checks:
+          # check_module_coverage "CLI Runtime" "cli-runtime" "coverage-cli-runtime.out" "70.0"
+          # check_module_coverage "Controller Runtime" "controller-runtime" "coverage-controller-runtime.out" "70.0"
+          # check_module_coverage "Examples" "examples" "coverage-examples.out" "60.0"
           
           if [ ${#failed_modules[@]} -ne 0 ]; then
             echo ""
