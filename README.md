@@ -1,6 +1,6 @@
 # k1s
 
-**Status**: 🚧 Under active development - APIs may change
+**Status**: 🚧 Under active development - Not functional at all ATM - APIs may change
 
 A Kubernetes-native runtime for building CLI tools with embedded storage and controller capabilities.
 
