@@ -60,20 +60,20 @@ jobs:
             exit 1
           fi
 
-  # Linting - independent from format
-  lint:
-    name: Lint
+  # Linting - conditional jobs based on changes
+  lint-core:
+    name: Lint Core
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-
       - name: Activate Hermit
         uses: cashapp/activate-hermit@v1
         with:
           cache: true
-
       - name: Cache Go modules
         uses: actions/cache@v4
         with:
@@ -83,12 +83,179 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum', 'go.work.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
-
       - name: Download dependencies
         run: go work sync
+      - name: Run linting - Core
+        run: golangci-lint run --config=.golangci.yml --timeout=10m ./...
+        working-directory: core
 
-      - name: Run linting
-        run: just lint
+  lint-memory:
+    name: Lint Memory Storage
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.memory == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@v1
+        with:
+          cache: true
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum', 'go.work.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - name: Download dependencies
+        run: go work sync
+      - name: Run linting - Memory Storage
+        run: golangci-lint run --config=../.golangci.yml --timeout=10m ./...
+        working-directory: storage/memory
+
+  lint-pebble:
+    name: Lint Pebble Storage
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.pebble == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@v1
+        with:
+          cache: true
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum', 'go.work.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - name: Download dependencies
+        run: go work sync
+      - name: Run linting - Pebble Storage
+        run: golangci-lint run --config=../../.golangci.yml --timeout=10m ./...
+        working-directory: storage/pebble
+
+  lint-cli-gen:
+    name: Lint CLI-Gen Tool
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.cli-gen == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@v1
+        with:
+          cache: true
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum', 'go.work.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - name: Download dependencies
+        run: go work sync
+      - name: Run linting - CLI-Gen Tool
+        run: golangci-lint run --config=../../.golangci.yml --timeout=10m ./...
+        working-directory: tools/cli-gen
+
+  lint-cli-runtime:
+    name: Lint CLI Runtime
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.cli-runtime == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@v1
+        with:
+          cache: true
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum', 'go.work.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - name: Download dependencies
+        run: go work sync
+      - name: Run linting - CLI Runtime
+        run: golangci-lint run --config=../.golangci.yml --timeout=10m ./...
+        working-directory: cli-runtime
+
+  lint-controller-runtime:
+    name: Lint Controller Runtime
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.controller-runtime == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@v1
+        with:
+          cache: true
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum', 'go.work.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - name: Download dependencies
+        run: go work sync
+      - name: Run linting - Controller Runtime
+        run: golangci-lint run --config=../.golangci.yml --timeout=10m ./...
+        working-directory: controller-runtime
+
+  lint-examples:
+    name: Lint Examples
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.examples == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@v1
+        with:
+          cache: true
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum', 'go.work.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - name: Download dependencies
+        run: go work sync
+      - name: Run linting - Examples
+        run: golangci-lint run --config=../.golangci.yml --timeout=10m ./...
+        working-directory: examples
 
   # Detect changes to determine which modules need testing
   changes:
@@ -370,8 +537,8 @@ jobs:
   build:
     name: Build & Performance
     runs-on: ubuntu-latest
-    needs: [format, lint]
-    if: always() && (needs.format.result == 'success' && needs.lint.result == 'success')
+    needs: [format, lint-core, lint-memory, lint-pebble, lint-cli-gen, lint-cli-runtime, lint-controller-runtime, lint-examples]
+    if: always() && needs.format.result == 'success'
     
     steps:
       - name: Checkout code
