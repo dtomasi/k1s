@@ -15,18 +15,22 @@ k1s/
 │
 ├── core/                     # Core k1s functionality
 │   ├── go.mod               # Main module
-│   └── pkg/
-│       ├── runtime/         # Type system & orchestration
-│       ├── client/          # Client interface implementation
-│       ├── storage/         # Multi-tenant storage interface & factory
-│       ├── codec/           # Serialization
-│       ├── registry/        # Resource management
-│       ├── validation/      # Validation engine
-│       ├── defaulting/      # Defaulting engine
-│       ├── events/          # Kubernetes event system
-│       ├── informers/       # Informer factory for CLI-optimized queries
-│       ├── controller/      # Controller-runtime package
-│       └── cli-runtime/     # CLI builders, factories, formatters
+│   ├── runtime/             # Type system & orchestration
+│   ├── client/              # Client interface implementation
+│   ├── storage/             # Multi-tenant storage interface & factory
+│   ├── codec/               # Serialization
+│   ├── registry/            # Resource management
+│   ├── validation/          # Validation engine
+│   ├── defaulting/          # Defaulting engine
+│   ├── events/              # ✅ Kubernetes event system (COMPLETED)
+│   ├── informers/           # Informer factory for CLI-optimized queries
+│   └── types/               # Core types and scheme definitions
+│
+├── cli-runtime/              # CLI builders, factories, formatters
+│   └── go.mod               # CLI runtime module
+│
+├── controller-runtime/       # Controller-runtime package
+│   └── go.mod               # Controller runtime module
 │
 ├── storage/                  # Storage backend modules
 │   ├── memory/
@@ -37,9 +41,8 @@ k1s/
 │       └── pebble.go
 │
 ├── tools/                    # Development tools
-│   ├── go.mod               # Tools module
-│   └── cmd/
-│       └── cli-gen/         # Code generation tool
+│   └── cli-gen/             # Code generation tool
+│       └── go.mod           # CLI-gen module
 │
 └── examples/                 # Examples and demos
     ├── go.mod               # Examples module
@@ -52,28 +55,35 @@ k1s/
 ```mermaid
 graph TD
     Core[core module]
+    CLI[cli-runtime module]
+    Controller[controller-runtime module]
     Memory[storage/memory module]
     Pebble[storage/pebble module]
-    Tools[tools module]
+    CliGen[tools/cli-gen module]
     Examples[examples module]
     
     %% Dependencies
+    CLI --> Core
+    Controller --> Core
     Memory --> Core
     Pebble --> Core
-    Tools --> Core
+    CliGen --> Core
     Examples --> Core
     Examples --> Memory
     Examples --> Pebble
+    Examples --> CLI
     
     %% Styling
     classDef coreModule fill:#e8f5e8
+    classDef runtimeModule fill:#e3f2fd
     classDef storageModule fill:#fce4ec
     classDef toolModule fill:#fff3e0
     classDef exampleModule fill:#e1f5fe
     
     class Core coreModule
-    class Memory,Bolt,Badger,Pebble storageModule
-    class Tools toolModule
+    class CLI,Controller runtimeModule
+    class Memory,Pebble storageModule
+    class CliGen toolModule
     class Examples exampleModule
 ```
 
@@ -87,9 +97,12 @@ graph TD
 - `runtime/` - Type system, scheme, orchestration
 - `client/` - Kubernetes-compatible client interface
 - `storage/` - Storage abstraction and factory
-- `events/` - Kubernetes event system
-- `controller/` - Controller-runtime compatibility
-- `cli-runtime/` - CLI builders and formatters
+- `events/` - ✅ Kubernetes event system (COMPLETED)
+- `types/` - Core type definitions and scheme
+- `registry/` - Resource management
+- `validation/` - Validation engine
+- `defaulting/` - Defaulting engine
+- `codec/` - Serialization and encoding
 
 **Dependencies:** Standard library + k8s.io packages
 
@@ -103,14 +116,39 @@ graph TD
 
 **Dependencies:** Core module + respective database libraries
 
-### Tools Module (`tools/`)
+### CLI Runtime Module (`cli-runtime/`)
+
+**Purpose:** kubectl-compatible CLI operations and builders
+
+**Components:**
+- CLI operation builders with fluent API
+- Output formatters (table, JSON, YAML, custom columns)
+- Selector and filtering support
+- Watch and streaming operations
+
+**Dependencies:** Core module + CLI libraries
+
+### Controller Runtime Module (`controller-runtime/`)
+
+**Purpose:** Simplified controller-runtime for k1s
+
+**Components:**
+- Manager interface for controller lifecycle
+- Controller and Reconciler interfaces
+- Builder API for controller configuration
+- Integration with k1s client and informers
+
+**Dependencies:** Core module + controller-runtime patterns
+
+### Tools Module (`tools/cli-gen/`)
 
 **Purpose:** Development and code generation tools
 
 **Components:**
-- `cli-gen/` - kubebuilder-compatible code generator
+- kubebuilder-compatible code generator
 - Schema generation for IDE integration
 - Validation strategy generation
+- Resource metadata generation
 
 **Dependencies:** Core module + code generation libraries
 
@@ -133,11 +171,13 @@ graph TD
 go 1.25.1
 
 use (
+    ./cli-runtime
+    ./controller-runtime
     ./core
+    ./examples
     ./storage/memory
     ./storage/pebble
-    ./tools
-    ./examples
+    ./tools/cli-gen
 )
 ```
 
@@ -166,9 +206,9 @@ import (
 
 ```go
 import (
-    "github.com/dtomasi/k1s/core/pkg/cli-runtime"
-    "github.com/dtomasi/k1s/core/pkg/runtime"
-    "github.com/dtomasi/k1s/storage/bolt"
+    "github.com/dtomasi/k1s/cli-runtime"
+    "github.com/dtomasi/k1s/core/runtime"
+    "github.com/dtomasi/k1s/storage/pebble"
 )
 ```
 
@@ -176,8 +216,8 @@ import (
 
 ```go
 import (
-    "github.com/dtomasi/k1s/core/pkg/controller"
-    "github.com/dtomasi/k1s/core/pkg/runtime"
+    "github.com/dtomasi/k1s/controller-runtime"
+    "github.com/dtomasi/k1s/core/runtime"
     "github.com/dtomasi/k1s/storage/pebble"
 )
 ```
