@@ -55,5 +55,41 @@ var _ = Describe("Utils", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(obj.GetResourceVersion()).To(Equal("123"))
 		})
+
+		It("should update list resource version", func() {
+			list := &corev1.ConfigMapList{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "ConfigMapList",
+					APIVersion: "v1",
+				},
+			}
+			err := versioner.UpdateList(list, 456, "continue-token", nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(list.GetResourceVersion()).To(Equal("456"))
+		})
+
+		It("should prepare object for storage", func() {
+			err := versioner.PrepareObjectForStorage(obj)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should get object resource version", func() {
+			obj.SetResourceVersion("789")
+			version, err := versioner.ObjectResourceVersion(obj)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(version).To(Equal(uint64(789)))
+		})
+
+		It("should parse resource version", func() {
+			version, err := versioner.ParseResourceVersion("999")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(version).To(Equal(uint64(999)))
+		})
+
+		It("should parse watch resource version", func() {
+			version, err := versioner.ParseWatchResourceVersion("888")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(version).To(Equal(uint64(888)))
+		})
 	})
 })
