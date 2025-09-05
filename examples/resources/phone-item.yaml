@@ -1,0 +1,22 @@
+apiVersion: examples.k1s.dtomasi.github.io/v1alpha1
+kind: Item
+metadata:
+  name: phone-456
+  namespace: default
+  labels:
+    category: electronics
+    brand: apple
+    type: smartphone
+spec:
+  description: iPhone 15 Pro - Latest flagship smartphone
+  category: electronics
+  quantity: 12
+  price: "999.00"
+  currency: USD
+  tags:
+    - smartphone
+    - apple
+    - iphone
+    - flagship
+status:
+  availability: Available

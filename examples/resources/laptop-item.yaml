@@ -1,0 +1,22 @@
+apiVersion: examples.k1s.dtomasi.github.io/v1alpha1
+kind: Item
+metadata:
+  name: laptop-123
+  namespace: default
+  labels:
+    category: computers
+    brand: dell
+    type: laptop
+spec:
+  description: Dell XPS 13 - High-performance ultrabook
+  category: computers
+  quantity: 5
+  price: "1299.99"
+  currency: USD
+  tags:
+    - ultrabook
+    - dell
+    - xps
+    - business
+status:
+  availability: Available

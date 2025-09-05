@@ -1,0 +1,17 @@
+apiVersion: examples.k1s.dtomasi.github.io/v1alpha1
+kind: Category
+metadata:
+  name: electronics
+  namespace: default
+  labels:
+    type: product-category
+    department: technology
+spec:
+  description: Electronic devices and accessories
+  tags:
+    - technology
+    - gadgets
+    - devices
+status:
+  itemCount: 0
+  subcategoryCount: 0

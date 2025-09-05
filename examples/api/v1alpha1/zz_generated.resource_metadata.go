@@ -11,6 +11,22 @@ import (
 	"github.com/dtomasi/k1s/core/registry"
 )
 
+// GroupVersionKind constants for resources
+var (
+	// CategoryGroupVersionKind is the GVK for Category resources
+	CategoryGroupVersionKind = schema.GroupVersionKind{
+		Group:   "examples.k1s.dtomasi.github.io",
+		Version: "v1alpha1",
+		Kind:    "Category",
+	}
+	// ItemGroupVersionKind is the GVK for Item resources
+	ItemGroupVersionKind = schema.GroupVersionKind{
+		Group:   "examples.k1s.dtomasi.github.io",
+		Version: "v1alpha1",
+		Kind:    "Item",
+	}
+)
+
 // ResourceMetadata contains metadata about a resource type
 type ResourceMetadata struct {
 	Group   string
@@ -195,6 +211,26 @@ func GetGroupVersionKind(kind string) (*schema.GroupVersionKind, bool) {
 		Kind:    meta.Config.Kind,
 	}
 	return gvk, true
+}
+
+// GetAllGroupVersionKinds returns all GroupVersionKinds for this package
+func GetAllGroupVersionKinds() []schema.GroupVersionKind {
+	return []schema.GroupVersionKind{
+		CategoryGroupVersionKind,
+		ItemGroupVersionKind,
+	}
+}
+
+// GetGVKFromKind returns the GroupVersionKind for a given Kind string
+func GetGVKFromKind(kind string) (schema.GroupVersionKind, bool) {
+	switch kind {
+	case "Category":
+		return CategoryGroupVersionKind, true
+	case "Item":
+		return ItemGroupVersionKind, true
+	default:
+		return schema.GroupVersionKind{}, false
+	}
 }
 
 // RegisterAllResources registers all generated resources with the provided registry
