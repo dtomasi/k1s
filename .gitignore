@@ -125,6 +125,7 @@ debug_test.go
 # Temporary directories
 /tmp/
 /temp/
+**/dist/
 
 ## Exclude CLI generator binaries
 /tools/cli-gen/cli-gen

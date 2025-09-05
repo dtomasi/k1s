@@ -8,7 +8,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/dtomasi/k1s/core/pkg/registry"
+	"github.com/dtomasi/k1s/core/registry"
 )
 
 // ResourceMetadata contains metadata about a resource type
@@ -102,7 +102,7 @@ func GetGroupVersionResource(kind string) (*schema.GroupVersionResource, bool) {
 	return gvr, true
 }
 
-// GetGroupVersionKind returns the GVK for a given kind  
+// GetGroupVersionKind returns the GVK for a given kind
 func GetGroupVersionKind(kind string) (*schema.GroupVersionKind, bool) {
 	meta, ok := GetResourceMetadata(kind)
 	if !ok {
@@ -128,7 +128,7 @@ func RegisterAllResources(reg registry.Registry) error {
 			Version:  meta.Version,
 			Resource: meta.Config.Plural,
 		}
-		
+
 		if err := reg.RegisterResource(gvr, meta.Config); err != nil {
 			return err
 		}

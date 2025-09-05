@@ -9,8 +9,8 @@ import (
 	"reflect"
 
 	"k8s.io/apimachinery/pkg/runtime"
-	
-	"github.com/dtomasi/k1s/core/pkg/defaulting"
+
+	"github.com/dtomasi/k1s/core/defaulting"
 )
 
 // GetDefaultingStrategy returns the defaulting strategy for a given kind
@@ -59,7 +59,7 @@ func (s *{{ .Kind }}DefaultingStrategy) Apply(ctx context.Context, obj runtime.O
 	if rv.Kind() == reflect.Ptr {
 		rv = rv.Elem()
 	}
-	
+
 	if rv.Kind() != reflect.Struct {
 		return nil // Skip non-struct objects
 	}

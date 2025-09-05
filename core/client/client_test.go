@@ -606,4 +606,38 @@ var _ = Describe("Client", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
+
+	Describe("JSON Patch operations", func() {
+		BeforeEach(func() {
+			err := testClient.Create(ctx, testItem)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should apply JSON patch", func() {
+			operations := []client.JSONPatchOperation{
+				{
+					Op:    "replace",
+					Path:  "/spec/description",
+					Value: "Updated via JSON patch",
+				},
+			}
+			jsonPatch := client.JSONPatch(operations)
+
+			err := testClient.Patch(ctx, testItem, jsonPatch)
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	Describe("Server-side apply operations", func() {
+		BeforeEach(func() {
+			err := testClient.Create(ctx, testItem)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should apply server-side patch", func() {
+			applyPatch := client.Apply(testItem)
+			err := testClient.Patch(ctx, testItem, applyPatch)
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
 })
