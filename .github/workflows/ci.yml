@@ -21,7 +21,7 @@ jobs:
   format:
     name: Format Check
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -66,7 +66,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.core == 'true'
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -94,7 +94,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.memory == 'true'
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -122,7 +122,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.pebble == 'true'
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -150,7 +150,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.cli-gen == 'true'
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -178,7 +178,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.cli-runtime == 'true'
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -206,7 +206,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.controller-runtime == 'true'
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -234,7 +234,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.examples == 'true'
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -270,11 +270,11 @@ jobs:
       controller-runtime: ${{ steps.changes.outputs.controller-runtime }}
       examples: ${{ steps.changes.outputs.examples }}
       go-files: ${{ steps.changes.outputs.go-files }}
-      
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-        
+
       - name: Detect changed files
         uses: dorny/paths-filter@v3
         id: changes
@@ -326,7 +326,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.core == 'true'
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -370,7 +370,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.memory == 'true'
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -398,7 +398,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.pebble == 'true'
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -426,7 +426,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.cli-gen == 'true'
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -454,7 +454,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.cli-runtime == 'true'
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -482,7 +482,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.controller-runtime == 'true'
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -510,7 +510,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.examples == 'true'
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -539,7 +539,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [format, lint-core, lint-memory, lint-pebble, lint-cli-gen, lint-cli-runtime, lint-controller-runtime, lint-examples]
     if: always() && needs.format.result == 'success'
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -604,7 +604,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [test-core, test-memory, test-pebble, test-cli-gen]
     if: always()
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -630,18 +630,11 @@ jobs:
       - name: Install bc for calculations
         run: sudo apt-get update && sudo apt-get install -y bc
 
-      - name: Check coverage - Core (70% required)
+      - name: Generate coverage reports
         run: |
-          go test -coverprofile=coverage.out -covermode=atomic ./...
-          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
-          echo "Core module coverage: ${COVERAGE}%"
-          if (( $(echo "${COVERAGE} < 70.0" | bc -l) )); then
-            echo "❌ Core module coverage ${COVERAGE}% is below required 70%"
-            exit 1
-          else
-            echo "✅ Core module coverage ${COVERAGE}% meets requirement"
-          fi
-        working-directory: core
+          # Generate core coverage report
+          cd core && go test -coverprofile=coverage.out -covermode=atomic ./...
+          cd ..
 
       - name: Check coverage - All modules
         run: |
@@ -683,13 +676,13 @@ jobs:
           }
           
           # Check each module
+          check_module_coverage "Core" "core" "coverage.out" "70.0"
           check_module_coverage "Memory Storage" "storage/memory" "coverage-memory.out" "70.0"
-          check_module_coverage "Pebble Storage" "storage/pebble" "coverage-pebble.out" "65.0"
+          check_module_coverage "Pebble Storage" "storage/pebble" "coverage-pebble.out" "70.0"
           check_module_coverage "CLI-Gen Tool" "tools/cli-gen" "coverage-cli-gen.out" "70.0"
-          # Unimplemented modules excluded from coverage checks:
-          # check_module_coverage "CLI Runtime" "cli-runtime" "coverage-cli-runtime.out" "70.0"
-          # check_module_coverage "Controller Runtime" "controller-runtime" "coverage-controller-runtime.out" "70.0"
-          # check_module_coverage "Examples" "examples" "coverage-examples.out" "60.0"
+          check_module_coverage "CLI Runtime" "cli-runtime" "coverage-cli-runtime.out" "00.0"
+          check_module_coverage "Controller Runtime" "controller-runtime" "coverage-controller-runtime.out" "00.0"
+          check_module_coverage "Examples" "examples" "coverage-examples.out" "00.0"
           
           if [ ${#failed_modules[@]} -ne 0 ]; then
             echo ""
@@ -699,7 +692,7 @@ jobs:
           
           echo "✅ All modules meet coverage requirements"
 
-  # Security scanning runs independently 
+  # Security scanning runs independently
   security:
     name: Security Scan
     runs-on: ubuntu-latest
