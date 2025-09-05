@@ -6,7 +6,7 @@ replace github.com/dtomasi/k1s/core => ../core
 
 require (
 	github.com/dtomasi/k1s/core v0.0.0-00010101000000-000000000000
-	github.com/spf13/pflag v1.0.9
+	github.com/spf13/pflag v1.0.10
 	k8s.io/apimachinery v0.34.0
 	sigs.k8s.io/yaml v1.6.0
 )
