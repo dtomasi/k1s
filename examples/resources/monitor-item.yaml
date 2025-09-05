@@ -1,0 +1,22 @@
+apiVersion: examples.k1s.dtomasi.github.io/v1alpha1
+kind: Item
+metadata:
+  name: monitor-789
+  namespace: default
+  labels:
+    category: computers
+    brand: lg
+    type: monitor
+spec:
+  description: LG UltraWide 34" 4K Display
+  category: computers
+  quantity: 8
+  price: "599.99"
+  currency: USD
+  tags:
+    - monitor
+    - lg
+    - ultrawide
+    - 4k
+status:
+  availability: Available

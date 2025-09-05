@@ -107,6 +107,8 @@ func (g *Generator) Generate(resources []*extractor.ResourceInfo) error {
 		}
 	}
 
+	// GVK constants are now generated as part of resource metadata
+
 	return nil
 }
 
@@ -156,6 +158,8 @@ func (g *Generator) generateDefaultingStrategies(resources []*extractor.Resource
 		"PackageName": packageName,
 	})
 }
+
+// GVK constants are now included in resource metadata generation
 
 // executeTemplateFromFile executes a template from embed.FS and writes the output to a file
 func (g *Generator) executeTemplateFromFile(filename, templatePath string, data interface{}) error {

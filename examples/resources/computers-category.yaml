@@ -1,0 +1,19 @@
+apiVersion: examples.k1s.dtomasi.github.io/v1alpha1
+kind: Category
+metadata:
+  name: computers
+  namespace: default
+  labels:
+    type: product-category
+    department: technology
+    parent: electronics
+spec:
+  description: Desktop and laptop computers
+  parentCategory: electronics
+  tags:
+    - computers
+    - laptops
+    - desktops
+status:
+  itemCount: 0
+  subcategoryCount: 0
