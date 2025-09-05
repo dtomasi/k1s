@@ -8,8 +8,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/dtomasi/k1s/core/client"
+	"github.com/dtomasi/k1s/core/defaulting"
 	"github.com/dtomasi/k1s/core/events"
 	"github.com/dtomasi/k1s/core/events/sinks"
+	"github.com/dtomasi/k1s/core/registry"
+	"github.com/dtomasi/k1s/core/storage"
+	"github.com/dtomasi/k1s/core/validation"
 )
 
 // Runtime represents the core k1s runtime system that orchestrates all components
@@ -69,8 +73,155 @@ type RuntimeOptions struct {
 	DefaultComponent string
 }
 
-// NewRuntime creates a new k1s runtime instance
-func NewRuntime(options RuntimeOptions) (Runtime, error) {
+// Option is a functional option for configuring the runtime
+type Option func(*Config)
+
+// Config holds configuration for the k1s runtime
+type Config struct {
+	// Tenant name for multi-tenant support
+	Tenant string
+
+	// EnableRBAC controls whether RBAC is enabled
+	EnableRBAC bool
+
+	// EnableEvents controls whether the event system is enabled
+	EnableEvents bool
+
+	// DefaultComponent is the default component name for event recording
+	DefaultComponent string
+
+	// EventBroadcasterOptions provides configuration for the event broadcaster
+	EventBroadcasterOptions events.EventBroadcasterOptions
+
+	// ValidationConfig provides validation configuration (placeholder for future use)
+	ValidationConfig interface{}
+
+	// DefaultingConfig provides defaulting configuration (placeholder for future use)
+	DefaultingConfig interface{}
+}
+
+// DefaultConfig returns a configuration with sensible defaults
+func DefaultConfig() *Config {
+	return &Config{
+		Tenant:           "default",
+		EnableRBAC:       false,
+		EnableEvents:     true,
+		DefaultComponent: events.DefaultComponent,
+		EventBroadcasterOptions: events.EventBroadcasterOptions{
+			QueueSize:      events.DefaultEventQueueSize,
+			MetricsEnabled: true,
+		},
+	}
+}
+
+// WithTenant sets the tenant name
+func WithTenant(name string) Option {
+	return func(c *Config) {
+		c.Tenant = name
+	}
+}
+
+// WithRBAC enables RBAC with the given configuration
+func WithRBAC(enabled bool) Option {
+	return func(c *Config) {
+		c.EnableRBAC = enabled
+	}
+}
+
+// WithEvents enables or disables the event system
+func WithEvents(enabled bool) Option {
+	return func(c *Config) {
+		c.EnableEvents = enabled
+	}
+}
+
+// WithDefaultComponent sets the default component name for events
+func WithDefaultComponent(component string) Option {
+	return func(c *Config) {
+		c.DefaultComponent = component
+	}
+}
+
+// WithValidation sets validation configuration (placeholder for future use)
+func WithValidation(config interface{}) Option {
+	return func(c *Config) {
+		c.ValidationConfig = config
+	}
+}
+
+// WithDefaulting sets defaulting configuration (placeholder for future use)
+func WithDefaulting(config interface{}) Option {
+	return func(c *Config) {
+		c.DefaultingConfig = config
+	}
+}
+
+// NewRuntime creates a new k1s runtime instance with dependency injection
+// This is the new primary constructor that takes a storage backend and options
+func NewRuntime(storageBackend storage.Interface, opts ...Option) (Runtime, error) {
+	if storageBackend == nil {
+		return nil, fmt.Errorf("storage backend is required")
+	}
+
+	// Apply default configuration
+	config := DefaultConfig()
+
+	// Apply functional options
+	for _, opt := range opts {
+		opt(config)
+	}
+
+	// Validate configuration
+	if err := validateConfig(config); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+
+	// Create scheme with core resources auto-registered
+	scheme := NewScheme()
+	// Core resources are automatically registered in NewScheme()
+
+	// Create resource registry
+	resourceRegistry := registry.NewRegistry()
+
+	// Initialize validation engine (use nil for now)
+	var validator validation.Validator
+
+	// Initialize defaulting engine (use nil for now)
+	var defaulter defaulting.Defaulter
+
+	// Create client with all components
+	clientOptions := client.ClientOptions{
+		Scheme:    scheme,
+		Storage:   storageBackend,
+		Registry:  resourceRegistry,
+		Validator: validator,
+		Defaulter: defaulter,
+	}
+
+	client, err := client.NewClient(clientOptions)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create client: %w", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	return &k1sRuntime{
+		client: client,
+		scheme: scheme,
+		options: RuntimeOptions{
+			Client:                  client,
+			Scheme:                  scheme,
+			EnableEvents:            config.EnableEvents,
+			DefaultComponent:        config.DefaultComponent,
+			EventBroadcasterOptions: config.EventBroadcasterOptions,
+		},
+		ctx:    ctx,
+		cancel: cancel,
+	}, nil
+}
+
+// NewRuntimeWithOptions creates a new k1s runtime instance (legacy API for backward compatibility)
+func NewRuntimeWithOptions(options RuntimeOptions) (Runtime, error) {
 	if options.Client == nil {
 		return nil, fmt.Errorf("client is required")
 	}
@@ -97,6 +248,17 @@ func NewRuntime(options RuntimeOptions) (Runtime, error) {
 		ctx:     ctx,
 		cancel:  cancel,
 	}, nil
+}
+
+// validateConfig validates the runtime configuration
+func validateConfig(config *Config) error {
+	if config.Tenant == "" {
+		return fmt.Errorf("tenant name cannot be empty")
+	}
+	if config.DefaultComponent == "" {
+		return fmt.Errorf("default component cannot be empty")
+	}
+	return nil
 }
 
 // Start initializes and starts all runtime components
@@ -200,8 +362,11 @@ func (r *k1sRuntime) initializeEventSystem() {
 
 // RuntimeFactory provides a factory interface for creating runtime instances
 type RuntimeFactory interface {
-	// CreateRuntime creates a new runtime instance
+	// CreateRuntime creates a new runtime instance (legacy API)
 	CreateRuntime(options RuntimeOptions) (Runtime, error)
+
+	// CreateRuntimeWithStorage creates a new runtime instance with dependency injection
+	CreateRuntimeWithStorage(storageBackend storage.Interface, opts ...Option) (Runtime, error)
 }
 
 // DefaultRuntimeFactory implements RuntimeFactory
@@ -209,32 +374,51 @@ type DefaultRuntimeFactory struct{}
 
 // CreateRuntime creates a new runtime instance using the default implementation
 func (f *DefaultRuntimeFactory) CreateRuntime(options RuntimeOptions) (Runtime, error) {
-	return NewRuntime(options)
+	return NewRuntimeWithOptions(options)
+}
+
+// CreateRuntimeWithStorage creates a new runtime instance with storage backend injection
+func (f *DefaultRuntimeFactory) CreateRuntimeWithStorage(storageBackend storage.Interface, opts ...Option) (Runtime, error) {
+	return NewRuntime(storageBackend, opts...)
 }
 
 // Helper functions for runtime creation and management
 
-// CreateRuntimeWithClient creates a runtime with the specified client and default options
+// CreateRuntimeWithStorage creates a runtime with the specified storage backend and default options
+func CreateRuntimeWithStorage(storageBackend storage.Interface) (Runtime, error) {
+	return NewRuntime(storageBackend, WithEvents(true))
+}
+
+// CreateRuntimeWithClient creates a runtime with the specified client and default options (legacy)
 func CreateRuntimeWithClient(client client.Client, scheme *runtime.Scheme) (Runtime, error) {
-	return NewRuntime(RuntimeOptions{
+	return NewRuntimeWithOptions(RuntimeOptions{
 		Client:       client,
 		Scheme:       scheme,
 		EnableEvents: true,
 	})
 }
 
-// CreateRuntimeWithoutEvents creates a runtime with events disabled
+// CreateRuntimeWithoutEvents creates a runtime with events disabled (legacy)
 func CreateRuntimeWithoutEvents(client client.Client, scheme *runtime.Scheme) (Runtime, error) {
-	return NewRuntime(RuntimeOptions{
+	return NewRuntimeWithOptions(RuntimeOptions{
 		Client:       client,
 		Scheme:       scheme,
 		EnableEvents: false,
 	})
 }
 
-// CreateDefaultRuntime creates a runtime with standard configuration
+// CreateDefaultRuntime creates a runtime with standard configuration (new API)
+func CreateDefaultRuntimeWithStorage(storageBackend storage.Interface, component string) (Runtime, error) {
+	return NewRuntime(
+		storageBackend,
+		WithEvents(true),
+		WithDefaultComponent(component),
+	)
+}
+
+// CreateDefaultRuntime creates a runtime with standard configuration (legacy)
 func CreateDefaultRuntime(client client.Client, scheme *runtime.Scheme, component string) (Runtime, error) {
-	return NewRuntime(RuntimeOptions{
+	return NewRuntimeWithOptions(RuntimeOptions{
 		Client:           client,
 		Scheme:           scheme,
 		EnableEvents:     true,
