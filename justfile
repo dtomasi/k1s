@@ -61,6 +61,11 @@ info:
 
 # === Core Development Commands (Adaptive) ===
 
+# Quick development workflow commands (aliases for consistent usage)
+work-lint: lint
+work-test: test
+work-build: build
+
 # Format code (adaptive: check in CI, fix locally)
 format go_version=GO_VERSION:
     @just _ensure-go-version {{ go_version }}
