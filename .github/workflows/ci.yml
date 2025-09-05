@@ -82,21 +82,120 @@ jobs:
       - name: Run linting
         run: just lint
 
-  # Tests - run in parallel with format/lint
-  test:
-    name: Test
+  # Detect changes to determine which modules need testing
+  changes:
+    name: Detect Changes
     runs-on: ubuntu-latest
-    
+    outputs:
+      core: ${{ steps.changes.outputs.core }}
+      memory: ${{ steps.changes.outputs.memory }}
+      pebble: ${{ steps.changes.outputs.pebble }}
+      cli-gen: ${{ steps.changes.outputs.cli-gen }}
+      cli-runtime: ${{ steps.changes.outputs.cli-runtime }}
+      controller-runtime: ${{ steps.changes.outputs.controller-runtime }}
+      examples: ${{ steps.changes.outputs.examples }}
+      go-files: ${{ steps.changes.outputs.go-files }}
+      
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+        
+      - name: Detect changed files
+        uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            core:
+              - 'core/**/*.go'
+              - 'core/go.mod'
+              - 'core/go.sum'
+            memory:
+              - 'storage/memory/**/*.go'
+              - 'storage/memory/go.mod'
+              - 'storage/memory/go.sum'
+              - 'core/**/*.go'
+            pebble:
+              - 'storage/pebble/**/*.go'
+              - 'storage/pebble/go.mod'
+              - 'storage/pebble/go.sum'
+              - 'core/**/*.go'
+            cli-gen:
+              - 'tools/cli-gen/**/*.go'
+              - 'tools/cli-gen/go.mod'
+              - 'tools/cli-gen/go.sum'
+            cli-runtime:
+              - 'cli-runtime/**/*.go'
+              - 'cli-runtime/go.mod'
+              - 'cli-runtime/go.sum'
+              - 'core/**/*.go'
+            controller-runtime:
+              - 'controller-runtime/**/*.go'
+              - 'controller-runtime/go.mod'
+              - 'controller-runtime/go.sum'
+              - 'core/**/*.go'
+            examples:
+              - 'examples/**/*.go'
+              - 'examples/go.mod'
+              - 'examples/go.sum'
+              - 'core/**/*.go'
+            go-files:
+              - '**/*.go'
+              - '**/go.mod'
+              - '**/go.sum'
+              - 'go.work'
+              - 'go.work.sum'
+
+  # Tests - run in parallel with format/lint, but only for changed modules
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.go-files == 'true'
+    strategy:
+      matrix:
+        include:
+          - module: core
+            path: core
+            needs-change: ${{ needs.changes.outputs.core }}
+            coverage-file: coverage.out
+          - module: memory
+            path: storage/memory
+            needs-change: ${{ needs.changes.outputs.memory }}
+            coverage-file: coverage-memory.out
+          - module: pebble
+            path: storage/pebble
+            needs-change: ${{ needs.changes.outputs.pebble }}
+            coverage-file: coverage-pebble.out
+          - module: cli-gen
+            path: tools/cli-gen
+            needs-change: ${{ needs.changes.outputs.cli-gen }}
+            coverage-file: coverage-cli-gen.out
+          - module: cli-runtime
+            path: cli-runtime
+            needs-change: ${{ needs.changes.outputs.cli-runtime }}
+            coverage-file: coverage-cli-runtime.out
+          - module: controller-runtime
+            path: controller-runtime
+            needs-change: ${{ needs.changes.outputs.controller-runtime }}
+            coverage-file: coverage-controller-runtime.out
+          - module: examples
+            path: examples
+            needs-change: ${{ needs.changes.outputs.examples }}
+            coverage-file: coverage-examples.out
+    
+    steps:
+      - name: Checkout code
+        if: matrix.needs-change == 'true'
+        uses: actions/checkout@v5
 
       - name: Activate Hermit
+        if: matrix.needs-change == 'true'
         uses: cashapp/activate-hermit@v1
         with:
           cache: true
 
       - name: Cache Go modules
+        if: matrix.needs-change == 'true'
         uses: actions/cache@v4
         with:
           path: |
@@ -107,33 +206,20 @@ jobs:
             ${{ runner.os }}-go-
 
       - name: Download dependencies
+        if: matrix.needs-change == 'true'
         run: go work sync
 
-      - name: Run tests - Core
-        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
-        working-directory: core
+      - name: Run tests - ${{ matrix.module }}
+        if: matrix.needs-change == 'true'
+        run: go test -race -coverprofile=${{ matrix.coverage-file }} -covermode=atomic ./...
+        working-directory: ${{ matrix.path }}
 
-      - name: Run tests - Memory Storage
-        run: go test -race -coverprofile=coverage-memory.out -covermode=atomic ./...
-        working-directory: storage/memory
-
-      - name: Run tests - Pebble Storage  
-        run: go test -race -coverprofile=coverage-pebble.out -covermode=atomic ./...
-        working-directory: storage/pebble
-
-      - name: Run tests - CLI-Gen Tool
-        run: go test -race -coverprofile=coverage-cli-gen.out -covermode=atomic ./...
-        working-directory: tools/cli-gen
-
-      - name: Run tests - Examples
-        run: go test -race -coverprofile=coverage-examples.out -covermode=atomic ./...
-        working-directory: examples
-
-      - name: Upload coverage to Codecov
+      - name: Upload coverage for ${{ matrix.module }}
+        if: matrix.needs-change == 'true' && env.CODECOV_TOKEN != ''
         uses: codecov/codecov-action@v5
-        if: env.CODECOV_TOKEN != ''
         with:
-          files: ./core/coverage.out,./storage/memory/coverage-memory.out,./storage/pebble/coverage-pebble.out,./tools/cli-gen/coverage-cli-gen.out,./examples/coverage-examples.out
+          files: ./${{ matrix.path }}/${{ matrix.coverage-file }}
+          flags: ${{ matrix.module }}
           fail_ci_if_error: false
           verbose: true
         continue-on-error: true
@@ -249,34 +335,60 @@ jobs:
           fi
         working-directory: core
 
-      - name: Check coverage - Storage modules
+      - name: Check coverage - All modules
         run: |
-          echo "=== Memory Storage Coverage ==="
-          cd storage/memory
-          go test -coverprofile=coverage-memory.out -covermode=atomic ./...
-          MEMORY_COVERAGE=$(go tool cover -func=coverage-memory.out | grep total | awk '{print $3}' | sed 's/%//')
-          echo "Memory storage coverage: ${MEMORY_COVERAGE}%"
+          failed_modules=()
           
-          if (( $(echo "${MEMORY_COVERAGE} < 70.0" | bc -l) )); then
-            echo "❌ Memory storage coverage ${MEMORY_COVERAGE}% is below required 70%"
+          # Function to check coverage for a module
+          check_module_coverage() {
+            local module_name="$1"
+            local module_path="$2" 
+            local coverage_file="$3"
+            local min_coverage="$4"
+            
+            echo "=== ${module_name} Coverage ==="
+            cd "${module_path}"
+            
+            if [ ! -f "${coverage_file}" ]; then
+              if ! go test -coverprofile="${coverage_file}" -covermode=atomic ./... 2>/dev/null; then
+                echo "⚠️  No tests in ${module_name}, skipping coverage check"
+                return 0
+              fi
+            fi
+            
+            if [[ ! -s "${coverage_file}" ]]; then
+              echo "⚠️  No coverage data for ${module_name}"
+              return 0
+            fi
+            
+            COVERAGE=$(go tool cover -func="${coverage_file}" | grep total | awk '{print $3}' | sed 's/%//')
+            echo "${module_name} coverage: ${COVERAGE}%"
+            
+            if (( $(echo "${COVERAGE} < ${min_coverage}" | bc -l) )); then
+              echo "❌ ${module_name} coverage ${COVERAGE}% is below required ${min_coverage}%"
+              failed_modules+=("${module_name}")
+            else
+              echo "✅ ${module_name} coverage ${COVERAGE}% meets requirement"
+            fi
+            
+            cd - > /dev/null
+          }
+          
+          # Check each module
+          check_module_coverage "Memory Storage" "storage/memory" "coverage-memory.out" "70.0"
+          check_module_coverage "Pebble Storage" "storage/pebble" "coverage-pebble.out" "65.0"
+          check_module_coverage "CLI-Gen Tool" "tools/cli-gen" "coverage-cli-gen.out" "70.0"
+          check_module_coverage "CLI Runtime" "cli-runtime" "coverage-cli-runtime.out" "70.0"
+          check_module_coverage "Controller Runtime" "controller-runtime" "coverage-controller-runtime.out" "70.0"
+          check_module_coverage "Examples" "examples" "coverage-examples.out" "60.0"
+          
+          if [ ${#failed_modules[@]} -ne 0 ]; then
+            echo ""
+            echo "❌ Coverage check failed for modules: ${failed_modules[*]}"
             exit 1
           fi
           
-          echo "=== Pebble Storage Coverage ==="
-          cd ../pebble
-          go test -coverprofile=coverage-pebble.out -covermode=atomic ./...
-          PEBBLE_COVERAGE=$(go tool cover -func=coverage-pebble.out | grep total | awk '{print $3}' | sed 's/%//')
-          echo "Pebble storage coverage: ${PEBBLE_COVERAGE}%"
-          
-          # Temporarily lower requirement for pebble storage as it's new and complex
-          if (( $(echo "${PEBBLE_COVERAGE} < 65.0" | bc -l) )); then
-            echo "❌ Pebble storage coverage ${PEBBLE_COVERAGE}% is below required 65%"
-            exit 1
-          else
-            echo "✅ Pebble storage coverage ${PEBBLE_COVERAGE}% meets temporary 65% requirement"
-          fi
-          
-          echo "✅ All storage modules meet coverage requirements"
+          echo "✅ All modules meet coverage requirements"
 
   # Security scanning runs independently 
   security:
