@@ -8,6 +8,14 @@ on:
 
 # Tools are managed by Hermit - single source of truth for versions
 
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Format check - fast and independent
   format:
@@ -145,57 +153,23 @@ jobs:
               - 'go.work'
               - 'go.work.sum'
 
-  # Tests - run in parallel with format/lint, but only for changed modules
-  test:
-    name: Test
+  # Tests - conditional jobs based on changes
+  test-core:
+    name: Test Core
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.go-files == 'true'
-    strategy:
-      matrix:
-        include:
-          - module: core
-            path: core
-            needs-change: ${{ needs.changes.outputs.core }}
-            coverage-file: coverage.out
-          - module: memory
-            path: storage/memory
-            needs-change: ${{ needs.changes.outputs.memory }}
-            coverage-file: coverage-memory.out
-          - module: pebble
-            path: storage/pebble
-            needs-change: ${{ needs.changes.outputs.pebble }}
-            coverage-file: coverage-pebble.out
-          - module: cli-gen
-            path: tools/cli-gen
-            needs-change: ${{ needs.changes.outputs.cli-gen }}
-            coverage-file: coverage-cli-gen.out
-          - module: cli-runtime
-            path: cli-runtime
-            needs-change: ${{ needs.changes.outputs.cli-runtime }}
-            coverage-file: coverage-cli-runtime.out
-          - module: controller-runtime
-            path: controller-runtime
-            needs-change: ${{ needs.changes.outputs.controller-runtime }}
-            coverage-file: coverage-controller-runtime.out
-          - module: examples
-            path: examples
-            needs-change: ${{ needs.changes.outputs.examples }}
-            coverage-file: coverage-examples.out
+    if: needs.changes.outputs.core == 'true'
     
     steps:
       - name: Checkout code
-        if: matrix.needs-change == 'true'
         uses: actions/checkout@v5
 
       - name: Activate Hermit
-        if: matrix.needs-change == 'true'
         uses: cashapp/activate-hermit@v1
         with:
           cache: true
 
       - name: Cache Go modules
-        if: matrix.needs-change == 'true'
         uses: actions/cache@v4
         with:
           path: |
@@ -206,31 +180,198 @@ jobs:
             ${{ runner.os }}-go-
 
       - name: Download dependencies
-        if: matrix.needs-change == 'true'
         run: go work sync
 
-      - name: Run tests - ${{ matrix.module }}
-        if: matrix.needs-change == 'true'
-        run: go test -race -coverprofile=${{ matrix.coverage-file }} -covermode=atomic ./...
-        working-directory: ${{ matrix.path }}
+      - name: Run tests - Core
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+        working-directory: core
 
-      - name: Upload coverage for ${{ matrix.module }}
-        if: matrix.needs-change == 'true' && env.CODECOV_TOKEN != ''
+      - name: Upload coverage
+        if: env.CODECOV_TOKEN != ''
         uses: codecov/codecov-action@v5
         with:
-          files: ./${{ matrix.path }}/${{ matrix.coverage-file }}
-          flags: ${{ matrix.module }}
+          files: ./core/coverage.out
+          flags: core
           fail_ci_if_error: false
           verbose: true
         continue-on-error: true
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
+  test-memory:
+    name: Test Memory Storage
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.memory == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@v1
+        with:
+          cache: true
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum', 'go.work.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - name: Download dependencies
+        run: go work sync
+      - name: Run tests - Memory Storage
+        run: go test -race -coverprofile=coverage-memory.out -covermode=atomic ./...
+        working-directory: storage/memory
+
+  test-pebble:
+    name: Test Pebble Storage
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.pebble == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@v1
+        with:
+          cache: true
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum', 'go.work.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - name: Download dependencies
+        run: go work sync
+      - name: Run tests - Pebble Storage
+        run: go test -race -coverprofile=coverage-pebble.out -covermode=atomic ./...
+        working-directory: storage/pebble
+
+  test-cli-gen:
+    name: Test CLI-Gen Tool
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.cli-gen == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@v1
+        with:
+          cache: true
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum', 'go.work.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - name: Download dependencies
+        run: go work sync
+      - name: Run tests - CLI-Gen Tool
+        run: go test -race -coverprofile=coverage-cli-gen.out -covermode=atomic ./...
+        working-directory: tools/cli-gen
+
+  test-cli-runtime:
+    name: Test CLI Runtime
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.cli-runtime == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@v1
+        with:
+          cache: true
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum', 'go.work.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - name: Download dependencies
+        run: go work sync
+      - name: Run tests - CLI Runtime
+        run: go test -race -coverprofile=coverage-cli-runtime.out -covermode=atomic ./...
+        working-directory: cli-runtime
+
+  test-controller-runtime:
+    name: Test Controller Runtime
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.controller-runtime == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@v1
+        with:
+          cache: true
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum', 'go.work.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - name: Download dependencies
+        run: go work sync
+      - name: Run tests - Controller Runtime
+        run: go test -race -coverprofile=coverage-controller-runtime.out -covermode=atomic ./...
+        working-directory: controller-runtime
+
+  test-examples:
+    name: Test Examples
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.examples == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@v1
+        with:
+          cache: true
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum', 'go.work.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - name: Download dependencies
+        run: go work sync
+      - name: Run tests - Examples
+        run: go test -race -coverprofile=coverage-examples.out -covermode=atomic ./...
+        working-directory: examples
+
   # Build & Performance - after basic quality checks pass
   build:
     name: Build & Performance
     runs-on: ubuntu-latest
-    needs: [format, lint, test]
+    needs: [format, lint]
+    if: always() && (needs.format.result == 'success' && needs.lint.result == 'success')
     
     steps:
       - name: Checkout code
@@ -294,8 +435,8 @@ jobs:
   coverage:
     name: Coverage Check
     runs-on: ubuntu-latest
-    needs: test
-    if: ${{ !cancelled() }}
+    needs: [test-core, test-memory, test-pebble, test-cli-gen, test-cli-runtime, test-controller-runtime, test-examples]
+    if: always()
     
     steps:
       - name: Checkout code
