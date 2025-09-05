@@ -9,7 +9,8 @@
 - [Controller-Runtime Package](Controller-Runtime-Package.md) - Controller runtime for CLI environments
 - [Graceful Shutdown & Work Tracking](Graceful-Shutdown-Work-Tracking.md) - Work tracking and graceful shutdown
 - [Implementation Plan](Implementation-Plan.md) - Phased implementation strategy
-- [Project Structure](Project-Structure.md) - Module and package organization
+- [Project Structure](Project-Structure.md) - Module and package organization  
+- [Syncer System Architecture](Syncer-System-Architecture.md) - Multi-source resource synchronization system
 
 ## Overview
 
@@ -72,6 +73,7 @@ graph TB
             CLIRT[CLI Runtime Package<br/>• Resource Builders<br/>• Output Formatters<br/>• Factory Pattern]
             CTRLRT[Controller Runtime Package<br/>• Triggered Reconciliation<br/>• Embedded/Plugin Controllers]
             PLUGIN[Plugin Manager<br/>• Restricted Clients<br/>• Permission Scoping<br/>• Sandbox Isolation]
+            SYNCER[Syncer System<br/>• Multi-Source Sync<br/>• Content Hash Optimization<br/>• Multi-Instance Support]
         end
         
         subgraph "K1S Two-Tier Runtime"
@@ -124,6 +126,9 @@ graph TB
     CTRLRT --> EVENTS
     CTRLRT --> PLUGIN
     PLUGIN -.->|Restricted| CLIENT
+    SYNCER --> RUNTIME
+    SYNCER --> CLIENT
+    SYNCER --> EVENTS
     
     %% Core Runtime Connections
     RUNTIME --> CLIENT
@@ -184,7 +189,7 @@ graph TB
     
     class CLI,TRIGGER appLayer
     class AUTH,AUTHZ,AUDIT securityLayer
-    class CLIRT,CTRLRT,PLUGIN runtimePkg
+    class CLIRT,CTRLRT,PLUGIN,SYNCER runtimePkg
     class RUNTIME,CLIENT,EVENTS,WORKTRACK coreRuntime
     class REGISTRY,VALIDATION,DEFAULTING,INFORMERS resourceMgmt
     class CODEC,SCHEME,STORAGE coreInfra
@@ -742,6 +747,105 @@ import (
 3. **User Choice**: Storage backend decided at compile time
 4. **Type Safety**: No string-based configuration
 5. **Kubernetes Compatible**: Familiar patterns and APIs
+
+## Syncer System Integration
+
+### Multi-Source Resource Synchronization
+**Location:** `core/pkg/syncer/`, `sync/*/`
+
+The K1S Syncer System enables automatic synchronization of resources from external sources into the k1s runtime. This transforms k1s from a standalone runtime into a powerful integration platform supporting GitOps workflows, migration scenarios, and multi-environment configurations.
+
+```go
+// Syncer Integration with Runtime
+import (
+    "github.com/dtomasi/k1s/core/pkg/syncer"
+    filesystem "github.com/dtomasi/k1s/sync/filesystem/pkg/filesystem"
+    kubernetes "github.com/dtomasi/k1s/sync/kubernetes/pkg/kubernetes"
+)
+
+func main() {
+    // Configure sync sources
+    sources := []syncer.SourceConfig{
+        {
+            Name:    "local-configs",
+            Source:  filesystem.New("./manifests"),
+            Enabled: true,
+        },
+        {
+            Name:    "staging-cluster",
+            Source:  kubernetes.New("staging", "inventory"),
+            Enabled: true,
+        },
+    }
+    
+    // Runtime with syncer integration
+    syncerConfig := &syncer.Config{
+        InstanceID: "dev-alice-001",  // Multi-instance support
+        Sources:    sources,
+        Options: syncer.Options{
+            ConflictResolution: syncer.ConflictSourceWins,
+            Interval:          30 * time.Second,
+        },
+    }
+    
+    runtime, err := k1s.NewManagedRuntime(k1s.ManagedRuntimeOptions{
+        // ... standard options
+        SyncerConfig: syncerConfig,  // Optional syncer integration
+    })
+}
+```
+
+### Key Syncer Features
+
+**Multi-Source Support:**
+- **Filesystem Sync** (`sync/filesystem`): Local YAML/JSON files with real-time watching
+- **Kubernetes Sync** (`sync/kubernetes`): Remote cluster resource synchronization  
+- **Go-Getter Sync** (`sync/gogetter`): Git repositories, HTTP endpoints, S3 buckets
+
+**Intelligent Optimization:**
+- **Content Hashing**: SHA-256 content hashing prevents unnecessary updates
+- **Skip-on-No-Change**: Resources with unchanged content hashes are automatically skipped
+- **Multi-Instance Support**: Instance-specific status tracking prevents conflicts
+
+**Status Tracking:**
+- **Instance-Specific Annotations**: `sync.k1s.io/{instance-id}/property` format
+- **Consensus Hash Detection**: Automatic detection of majority content agreement
+- **Sync History**: Configurable retention of sync operation history per instance
+
+### Modular Architecture
+
+```
+k1s/
+├── core/pkg/syncer/          # Interface definitions only
+│   ├── interface.go          # Source interface
+│   ├── manager.go           # Runtime integration
+│   └── config.go            # Configuration types
+├── sync/filesystem/         # Filesystem sync source
+│   ├── go.mod               # Separate module
+│   └── pkg/filesystem/source.go
+├── sync/kubernetes/         # Kubernetes sync source
+│   ├── go.mod               # Separate module  
+│   └── pkg/kubernetes/source.go
+└── sync/gogetter/          # Go-getter sync source
+    ├── go.mod               # Separate module
+    └── pkg/gogetter/source.go
+```
+
+**Dependency Injection Design:**
+- Core runtime defines only interfaces, no concrete implementations
+- Sync sources are separate Go modules under `sync/<source>/`
+- Users import only the sync sources they need
+- Completely optional - disabled by default
+
+### Integration Benefits
+
+1. **GitOps Workflows**: Automatic synchronization from Git repositories
+2. **Migration Support**: Seamless resource migration from Kubernetes clusters
+3. **Multi-Environment**: Development, staging, production configuration sync
+4. **Team Collaboration**: Multiple developers syncing shared configurations
+5. **Performance Optimized**: Content-based skip logic and intelligent caching
+
+For detailed implementation specifications, see [Syncer System Architecture](Syncer-System-Architecture.md).
 
 ## RBAC Integration (Optional)
 
