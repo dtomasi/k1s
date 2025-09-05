@@ -86,7 +86,7 @@ jobs:
       - name: Download dependencies
         run: go work sync
       - name: Run linting - Core
-        run: golangci-lint run --config=.golangci.yml --timeout=10m ./...
+        run: golangci-lint run --config=../.golangci.yml --timeout=10m ./...
         working-directory: core
 
   lint-memory:
