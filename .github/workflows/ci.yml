@@ -114,7 +114,7 @@ jobs:
       - name: Download dependencies
         run: go work sync
       - name: Run linting - Memory Storage
-        run: golangci-lint run --config=../.golangci.yml --timeout=10m ./...
+        run: golangci-lint run --config=../../.golangci.yml --timeout=10m ./...
         working-directory: storage/memory
 
   lint-pebble:
