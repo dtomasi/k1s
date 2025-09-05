@@ -702,6 +702,8 @@ jobs:
   security:
     name: Security Scan
     runs-on: ubuntu-latest
+    env:
+      ENABLE_SECURITY_UPLOADS: 'true'
 
     steps:
       - name: Checkout code
